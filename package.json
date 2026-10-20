@@ -1,0 +1,44 @@
+{
+  "name": "ai-quote-agent",
+  "version": "1.0.0",
+  "description": "AI Quote Creation Agent (Node/TypeScript): turns RFQ emails with Excel attachments into DRAFT Zoho Books quotations. Hybrid design: Claude extracts ambiguous text; deterministic code does all parsing, matching, math and Zoho calls.",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "start:prod": "node dist/src/index.js",
+    "process-now": "ts-node -e 'import { runWorkflowOnce } from \"./src/workflow/processor\"; runWorkflowOnce();'",
+    "test:mock": "ts-node test/sample-run.ts",
+    "test": "node --require ts-node/register --test test/unit.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:emails": "ts-node test/clumsy-emails.ts",
+    "seed:zoho": "ts-node test/seed-zoho.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "axios": "^1.20.0",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^18.0.8",
+    "exceljs": "^4.4.0",
+    "html-to-text": "^10.0.1",
+    "imapflow": "^2.5.7",
+    "mailparser": "^3.9.47",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.1.7",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/html-to-text": "^9.0.4",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^20.19.43",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^8.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}

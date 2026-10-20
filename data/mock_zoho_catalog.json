@@ -1,0 +1,134 @@
+{
+  "_comment": "Offline stand-in for Zoho Books contacts/items (ZOHO_MODE=mock). Items mirror the sample electrical RFQ: some carry the customer's material code as SKU (exact match), some differ only in spelling (fuzzy match), some use supplier wording (AI match), and the rest are absent (free-text lines).",
+  "customers": [
+    {
+      "contact_id": "mock-c-1001",
+      "contact_name": "Demo Customer Pvt Ltd",
+      "email": "quotes@demo.example.com",
+      "contact_type": "customer",
+      "status": "active"
+    },
+    {
+      "contact_id": "mock-c-1002",
+      "contact_name": "Acme Process Industries",
+      "email": "purchase@acme-process.example",
+      "contact_type": "customer",
+      "status": "active"
+    }
+  ],
+  "items": [
+    {
+      "item_id": "mock-i-2001",
+      "name": "Finder Relay 55.34 230VAC with Socket 94.84",
+      "sku": "1300077549",
+      "rate": 640.0,
+      "unit": "NOS",
+      "description": "Auxiliary relay 4NO+4NC 7A, 230VAC coil, with socket"
+    },
+    {
+      "item_id": "mock-i-2002",
+      "name": "GI Electrical Junction Box 4x4x2 in",
+      "sku": "1300043319",
+      "rate": 145.0,
+      "unit": "EA",
+      "description": "Galvanised iron junction box"
+    },
+    {
+      "item_id": "mock-i-2003",
+      "name": "Philips LED Downlight 18W DN172B",
+      "sku": "1200078573",
+      "rate": 1180.0,
+      "unit": "EA",
+      "description": "Round LED downlight with driver, IP20"
+    },
+    {
+      "item_id": "mock-i-2014",
+      "name": "SOP Stand Bracket A4 SS304 (4 slot, silver)",
+      "sku": "1300078079",
+      "rate": 0.0,
+      "unit": "NOS",
+      "description": "Price not yet set in the product master — demonstrates the price-missing flag"
+    },
+    {
+      "item_id": "mock-i-2004",
+      "name": "Cable Armoured 3.5 C x 25 sqmm Aluminium",
+      "sku": "CAB-AL-3.5C-25",
+      "rate": 198.0,
+      "unit": "MTR",
+      "description": "A2XWY aluminium armoured cable"
+    },
+    {
+      "item_id": "mock-i-2005",
+      "name": "Eaton 9E 3kVA Online UPS (9E-IN 3000XL)",
+      "sku": "EAT-9E3000XL",
+      "rate": 48500.0,
+      "unit": "EA",
+      "description": "Double-conversion online UPS, 96VDC battery bank"
+    },
+    {
+      "item_id": "mock-i-2006",
+      "name": "MECO DC Digital Panel Ammeter SMP35SW 0-100A",
+      "sku": "MECO-SMP35SW",
+      "rate": 2150.0,
+      "unit": "EA",
+      "description": "Digital panel meter, 85-265V aux, class 0.2"
+    },
+    {
+      "item_id": "mock-i-2007",
+      "name": "Libratherm Thyristor Power Regulator POW-3-PA-CL-75 (75A, 3 Phase)",
+      "sku": "LIB-POW3-75",
+      "rate": 38600.0,
+      "unit": "EA",
+      "description": "Phase-angle fired 3-phase heater load controller, 415VAC"
+    },
+    {
+      "item_id": "mock-i-2008",
+      "name": "Stainless Steel Cable Tie 150mm (pack of 100)",
+      "sku": "CT-SS-150",
+      "rate": 420.0,
+      "unit": "PKT",
+      "description": "SS304 cable tie, 4.6mm width"
+    },
+    {
+      "item_id": "mock-i-2009",
+      "name": "PE Duct Tape 50mm x 25m",
+      "sku": "TAPE-DUCT-50",
+      "rate": 165.0,
+      "unit": "EA",
+      "description": "Cloth scrim backed pressure-sensitive duct tape"
+    },
+    {
+      "item_id": "mock-i-2010",
+      "name": "Electrical Insulating Gloves Class 00 (500V) - Size L",
+      "sku": "GLV-CL00-L",
+      "rate": 1450.0,
+      "unit": "PAIR",
+      "description": "Natural latex, EN 60903"
+    },
+    {
+      "item_id": "mock-i-2011",
+      "name": "Rexnord Panel Cooling Fan 6 inch 230VAC",
+      "sku": "REX-AC062",
+      "rate": 1650.0,
+      "unit": "EA",
+      "description": "Axial AC fan, 2650 RPM, aluminium housing"
+    },
+    {
+      "item_id": "mock-i-2012",
+      "name": "SMPS Battery Charger 24VDC 15A",
+      "sku": "CHG-SMPS-24-15",
+      "rate": 9800.0,
+      "unit": "EA",
+      "description": "Switch mode battery charger"
+    },
+    {
+      "item_id": "mock-i-2013",
+      "name": "Stainless Steel Ball Valve 1 inch",
+      "sku": "VLV-SS-1",
+      "rate": 1450.0,
+      "unit": "NOS",
+      "description": "Not an electrical item — present to show non-matches",
+      "seed": false
+    }
+  ]
+}

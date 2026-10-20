@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+poc_agent.db*
+data/standalone/quotes/
+data/standalone/customers.csv
+.pytest_cache/
+
+# Node / TypeScript agent
+node_modules/
+dist/
+data/*.sqlite*
+test/.cache/

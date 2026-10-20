@@ -1,0 +1,33 @@
+# Internal network only:        docker compose up -d                    → http://<server>:8000
+# Public, with HTTPS:            set DOMAIN + BIND_ADDRESS=127.0.0.1 in .env, then
+#                                docker compose --profile https up -d   → https://<DOMAIN>
+services:
+  quote-agent:
+    build: .
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:8000:8000"
+    volumes:
+      - ./.env:/app/.env          # settings (also written by the dashboard's Setup page)
+      - quote-data:/data          # database, backups, price list, generated quotations
+    restart: unless-stopped
+
+  caddy:                          # HTTPS reverse proxy with automatic Let's Encrypt certificates
+    image: caddy:2.8.4
+    profiles: ["https"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - quote-agent
+    restart: unless-stopped
+
+volumes:
+  quote-data:
+  caddy-data:
+  caddy-config:

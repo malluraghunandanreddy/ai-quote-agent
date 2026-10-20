@@ -1,0 +1,5 @@
+# DOMAIN comes from .env (e.g. quotes.example.com). Its DNS A record must point at this server.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy quote-agent:8000
+}
