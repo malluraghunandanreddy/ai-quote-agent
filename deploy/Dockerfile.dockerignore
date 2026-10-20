@@ -1,0 +1,30 @@
+# Keeps secrets, data and clutter out of the image. (BuildKit uses this file for deploy/Dockerfile instead of the
+# root .dockerignore, which belongs to the older Python app.)
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+dist
+data
+branding
+test
+tests
+samples
+scripts
+app
+*.sqlite
+*.sqlite-*
+*.db
+*.md
+.venv
+__pycache__
+.pytest_cache
+poc_agent.db*
+docker-compose.yml
+Dockerfile
+Caddyfile
+docker-entrypoint.sh
+requirements*.txt
+deploy

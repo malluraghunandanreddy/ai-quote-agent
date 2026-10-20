@@ -1,0 +1,32 @@
+# The shared HTTPS front door for every client on this server. Start it once:
+#   cd /srv/quote-proxy && docker compose up -d
+# Each client gets a small file in ./sites (new-client.sh writes it). Ports 80 and 443 must reach this machine.
+name: quote-proxy
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - proxy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  proxy:
+    name: quote-proxy
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}

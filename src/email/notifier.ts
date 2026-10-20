@@ -3,6 +3,7 @@ import type { Config } from '../config';
 import { logger } from '../logger';
 import { synthesizeExceptionNotice, type ExceptionFacts } from '../llm/emailExtractor';
 import type { LlmClient } from '../llm/client';
+import type { DailySummary } from '../ops/monitor';
 import type { CustomerMatchTier, EnquiryMeta, SkippedRow, ZohoContact } from '../types';
 
 /**
@@ -73,6 +74,10 @@ export interface Notifier {
     tried: string[];
   }): Promise<SendResult>;
   processingFailed(ctx: { enquiry: EnquiryRef; error: string; attempts: number }): Promise<SendResult>;
+  /** The mailbox/Zoho checks keep failing (kind "down", once per outage) or work again ("recovered"). */
+  serviceAlert(ctx: { kind: 'down' | 'recovered'; detail: string; consecutiveFailures?: number }): Promise<SendResult>;
+  /** One email a day: what happened, what still needs a person, and proof the service is alive. */
+  dailySummary(summary: DailySummary): Promise<SendResult>;
 }
 
 // --- message rendering ---------------------------------------------------------------------------
@@ -318,6 +323,65 @@ export class MailNotifier implements Notifier {
         { heading: 'Failure', rows: [['Attempts', String(ctx.attempts)], ['Last error', oneLine(ctx.error, 500)]] },
         { heading: 'What to do', bullets: ['Create the quotation manually, or fix the cause and ask the sender to resend the enquiry.'] },
       ],
+    });
+  }
+
+  async serviceAlert(ctx: Parameters<Notifier['serviceAlert']>[0]): Promise<SendResult> {
+    const down = ctx.kind === 'down';
+    return this.deliver({
+      subject: down ? '[Quote agent] SERVICE PROBLEM: emails are not being processed' : '[Quote agent] Service recovered',
+      to: [this.config.notify.internal],
+      intro: down
+        ? `The quote assistant could not check the mailbox ${ctx.consecutiveFailures ?? 'several'} times in a row. New enquiries are NOT being turned into draft quotes until this is fixed.`
+        : 'The quote assistant is checking the mailbox normally again. Enquiries that arrived during the problem are picked up automatically.',
+      sections: [
+        { heading: down ? 'Last error' : 'Status', rows: [['Detail', oneLine(ctx.detail, 400)]] },
+        ...(down
+          ? [{ heading: 'What to check', bullets: ['The mailbox password (or app password) has not changed or expired.', 'The mail provider is reachable.', 'Zoho Books access has not been revoked.', 'If it keeps failing, contact support.'] }]
+          : []),
+      ],
+      ...(this.config.dashboard.publicUrl ? { link: { label: 'Open the dashboard', url: this.config.dashboard.publicUrl } } : {}),
+    });
+  }
+
+  async dailySummary(s: DailySummary): Promise<SendResult> {
+    const hm = (m: number): string => `${Math.floor(m / 60)} h ${Math.round(m % 60)} m`;
+    const sections: Section[] = [
+      {
+        heading: 'Last 24 hours',
+        rows: [
+          ['Enquiries received', String(s.received)],
+          ['Draft quotes created', `${s.drafts}${s.draftsToPrice > 0 ? ` (${s.draftsToPrice} with items to price)` : ''}`],
+          ...(s.flaggedForReview > 0 ? ([['Marked for review', `${s.flaggedForReview} (unusual quantity or total)`]] as Array<[string, string]>) : []),
+          ['Estimated time saved', hm(s.timeSavedMinutes)],
+          ...(s.timeSavedValue && s.timeSavedValue.amount > 0
+            ? ([['Worth about', new Intl.NumberFormat('en-IN', { style: 'currency', currency: s.timeSavedValue.currency, maximumFractionDigits: 0 }).format(s.timeSavedValue.amount) + ' of staff time']] as Array<[string, string]>)
+            : []),
+          ...(this.config.dashboard.showAiCost ? ([['AI usage', `${s.llm.calls} calls, about $${s.llm.estimatedUsd.toFixed(4)}`]] as Array<[string, string]>) : []),
+        ],
+      },
+      {
+        heading: 'Service',
+        rows: [
+          ['Mailbox checks', s.health.ok ? 'working' : `PROBLEM: ${s.health.reason ?? 'unknown'}`],
+          ['Last backup', s.backup.lastAt ? `${s.backup.lastAt.slice(0, 16).replace('T', ' ')} UTC${s.backup.ok ? '' : ' (the last attempt FAILED)'}` : 'none yet'],
+        ],
+      },
+    ];
+    if (s.needAttention.length > 0) {
+      sections.push({
+        heading: 'Still needs a person (last 7 days)',
+        bullets: listed(s.needAttention.map((n) => `${oneLine(n.sender, 60)}: ${oneLine(n.subject, 60) || '(no subject)'}. ${n.reason}`)),
+      });
+    }
+    const quiet = s.received === 0 && s.needAttention.length === 0;
+    return this.deliver({
+      subject: `[Quote agent] Daily summary ${s.date}: ${s.received} received, ${s.drafts} draft${s.drafts === 1 ? '' : 's'}${s.needAttention.length ? `, ${s.needAttention.length} need attention` : ''}`,
+      to: [this.config.notify.internal],
+      intro: quiet ? 'No enquiries arrived in the last 24 hours and nothing is waiting. The service is running.' : 'Here is what the quote assistant did in the last 24 hours.',
+      sections,
+      ...(s.dashboardUrl ? { link: { label: 'Open the dashboard', url: s.dashboardUrl } } : {}),
+      footer: 'Draft quotes are never sent to customers. Review them in Zoho Books before sending.',
     });
   }
 

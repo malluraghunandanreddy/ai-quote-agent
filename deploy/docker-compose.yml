@@ -1,0 +1,65 @@
+# One client's quote agent. new-client.sh copies this into the client's folder next to a generated .env;
+# you normally never edit it. Settings live in .env; data lives in ./data; logos in ./branding.
+#
+#   ./ctl.sh up        start (or update to the version named in .env)
+#   ./ctl.sh logs      what it is doing
+#   ./ctl.sh status    is it healthy?
+services:
+  app:
+    image: quote-agent:${QUOTE_AGENT_VERSION:-latest}
+    restart: unless-stopped
+    init: true
+    # Shutdown lets the enquiry being processed finish, so it is never left half-recorded.
+    stop_grace_period: 60s
+    env_file: .env
+    # These win over .env, so a typo in .env cannot break how the container is wired.
+    environment:
+      AGENT_DB_PATH: /data/quote-agent.sqlite
+      BACKUP_DIR: /data/backups
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: "3000"
+    # Reachable only from this machine (a reverse proxy or the https profile exposes it safely).
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+    volumes:
+      - ./data:/data
+      - ./branding:/app/branding:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Only with COMPOSE_PROFILES=https (one client on this server, no shared proxy): automatic HTTPS in front of the app.
+  caddy:
+    profiles: ["https"]
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${DASHBOARD_DOMAIN:-localhost} --to app:3000
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}

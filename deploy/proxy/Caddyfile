@@ -1,0 +1,8 @@
+# Shared front door. Certificates are fetched and renewed automatically.
+{
+	# Optional: an address that gets Let's Encrypt expiry notices.
+	# email you@yourcompany.com
+}
+
+# One file per client, written by new-client.sh (nothing to edit here).
+import /etc/caddy/sites/*.caddy

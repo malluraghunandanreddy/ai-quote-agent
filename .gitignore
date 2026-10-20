@@ -12,3 +12,5 @@ node_modules/
 dist/
 data/*.sqlite*
 test/.cache/
+data/backups/
+dist-image/

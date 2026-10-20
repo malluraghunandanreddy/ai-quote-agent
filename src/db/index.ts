@@ -15,6 +15,23 @@ function findSchema(): string {
   throw new Error('schema.sql not found (expected in the project root)');
 }
 
+/** Columns added after the first release. CREATE TABLE IF NOT EXISTS does not touch an existing file, so add them here. */
+const ADDED_COLUMNS: Array<[table: string, column: string, type: string]> = [
+  ['enquiries', 'customer_name', 'TEXT'],
+  ['enquiries', 'match_tier', 'TEXT'],
+  ['enquiries', 'company_in_email', 'TEXT'],
+  ['enquiries', 'email_date', 'TEXT'],
+  ['enquiries', 'unreadable_rows', 'INTEGER'],
+  ['enquiries', 'review_flags', 'TEXT'],
+];
+
+function migrate(db: Db): void {
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const have = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!have.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 /**
  * Open (creating if needed) the SQLite database and apply schema.sql.
  * WAL + busy_timeout let the CLI (`npm run process-now`) and the scheduler share the file safely.
@@ -26,5 +43,6 @@ export function openDatabase(file: string): Db {
   db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
   db.exec(fs.readFileSync(findSchema(), 'utf8'));
+  migrate(db);
   return db;
 }

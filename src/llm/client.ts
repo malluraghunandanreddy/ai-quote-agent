@@ -71,11 +71,14 @@ export class LlmClient {
   private readonly callTimes: number[] = [];
   private capWarnedAt = 0;
 
+  private readonly onUsage: ((task: string, inputTokens: number, outputTokens: number) => void) | undefined;
+
   /** `fetch` is only overridden by tests, to inspect the exact HTTP request without network access. */
   constructor(
     private readonly cfg: Config['llm'],
-    options: { fetch?: typeof fetch } = {},
+    options: { fetch?: typeof fetch; onUsage?: (task: string, inputTokens: number, outputTokens: number) => void } = {},
   ) {
+    this.onUsage = options.onUsage;
     this.sdk =
       cfg.enabled && cfg.apiKey
         ? new Anthropic({
@@ -119,6 +122,11 @@ export class LlmClient {
     u.outputTokens += usage.output_tokens;
     u.ms += Date.now() - startedAt;
     this.usage.set(key, u);
+    try {
+      this.onUsage?.(key, usage.input_tokens, usage.output_tokens);
+    } catch (err) {
+      logger.warn('Could not record model usage', { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   /**

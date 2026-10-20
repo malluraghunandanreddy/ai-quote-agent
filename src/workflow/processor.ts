@@ -28,7 +28,8 @@ import type {
 import { ZohoClient } from '../zoho/client';
 import { CustomerDirectory, resolveCustomer } from '../zoho/customerService';
 import { ItemCatalog } from '../zoho/itemService';
-import { buildEstimatePayload, createDraftEstimate, findEstimateByReference, quoteUrl } from '../zoho/quoteService';
+import { buildEstimatePayload, calendarDate, createDraftEstimate, findEstimateByReference, quoteUrl } from '../zoho/quoteService';
+import { reviewFindings } from './sanity';
 
 /** Everything the workflow needs, wired once. Tests and the mock run swap individual parts. */
 export interface Runtime {
@@ -67,7 +68,12 @@ export function createRuntime(config: Config, overrides: RuntimeOverrides = {}):
     staleProcessingMinutes: config.limits.staleProcessingMinutes,
     now: clock,
   });
-  const llm = overrides.llm ?? new LlmClient(config.llm);
+  const llm =
+    overrides.llm ??
+    new LlmClient(config.llm, {
+      onUsage: (task, inputTokens, outputTokens) =>
+        repo.addLlmUsage(calendarDate(clock(), config.timezone), task, 1, inputTokens, outputTokens),
+    });
   const zoho = overrides.zoho ?? new ZohoClient(zohoConfig);
   return {
     config,
@@ -219,6 +225,7 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
   // 3. Only now, for mail that will actually be quoted or halted on its customer, read the email text with the model.
   enquiry.meta = await extractEmailMetadata(rt.llm, mail);
   repo.audit(id, 'EMAIL_METADATA', `${enquiry.meta.source}${enquiry.meta.flags.length ? ` flags=${enquiry.meta.flags.join(',')}` : ''}`);
+  repo.setEmailInfo(id, { companyInEmail: enquiry.meta.companyName, emailDate: mail.date });
 
   // 4. Customer (never auto-created)
   const lookup = await resolveCustomer(
@@ -297,7 +304,12 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
     url: quoteUrl(rt.zohoConfig, config.quote.linkPath, estimate.estimateId),
     validUntil: payload.expiryDate,
   };
+  const findings = reviewFindings(parsed.lines, estimate.total, estimate.currencyCode, config.review);
   repo.recordEstimate(id, {
+    customerName: contact.company_name || contact.contact_name,
+    matchTier: tier,
+    unreadableRows: unreadable.length,
+    reviewFlags: [...new Set(findings.map((f) => f.flag))],
     customerId: contact.contact_id,
     estimateId: estimate.estimateId,
     estimateNumber: estimate.estimateNumber,
@@ -326,7 +338,7 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
     );
   }
 
-  const warnings: string[] = [];
+  const warnings: string[] = findings.map((f) => f.message);
   if (enquiry.meta.flags.includes('instructions_to_ai')) {
     warnings.push('The email contains text addressed to an AI system (for example "ignore previous instructions"). It was ignored and no free-text notes were taken from it. Treat this sender with caution.');
   }

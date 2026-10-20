@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
@@ -7,6 +8,7 @@ import ExcelJS from 'exceljs';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { ConfigError, loadConfig, type Config, type ZohoConfig } from '../src/config';
 import { openDatabase } from '../src/db';
+import { createBackup, listBackups, restoreBackup, verifyBackup } from '../src/ops/backup';
 import { Repository, type ClaimInput } from '../src/db/repository';
 import { computeKeys, isolateLatestMessage, parseRawEmail } from '../src/email/mailParser';
 import { MailNotifier, type Notifier } from '../src/email/notifier';
@@ -20,6 +22,9 @@ import { ExcelParseError, parseRfq } from '../src/excel/parser';
 import type { ColumnMapping, ZohoContact, ZohoItem } from '../src/types';
 import { setLogLevel } from '../src/logger';
 import { createRuntime, processRawMessage, type Runtime } from '../src/workflow/processor';
+import { reviewFindings } from '../src/workflow/sanity';
+import { runRetention } from '../src/ops/maintenance';
+import { HealthMonitor, buildDailySummary, computeHealth } from '../src/ops/monitor';
 import { ZohoApiError, ZohoClient } from '../src/zoho/client';
 import { CustomerDirectory, domainStem, resolveCustomer } from '../src/zoho/customerService';
 import { ItemCatalog } from '../src/zoho/itemService';
@@ -484,6 +489,12 @@ class RecordingNotifier implements Notifier {
   };
   customerNotFound = () => this.record('NOT_FOUND');
   processingFailed = () => this.record('FAILED');
+  readonly alerts: Array<{ kind: string; detail: string }> = [];
+  serviceAlert = async (ctx: { kind: 'down' | 'recovered'; detail: string }) => {
+    this.alerts.push({ kind: ctx.kind, detail: ctx.detail });
+    return this.record(`ALERT_${ctx.kind}`);
+  };
+  dailySummary = () => this.record('SUMMARY');
 }
 
 const zohoCfg: ZohoConfig = {
@@ -994,5 +1005,228 @@ describe('no duplicate drafts across runs', () => {
     assert.match(b.results[0]?.outcome ?? '', /^quote_created/);
     assert.equal(zoho.estimates.length, 1, 'the second run must not create another draft');
     assert.equal(a.results[0]?.quote?.estimateNumber, b.results[0]?.quote?.estimateNumber);
+  });
+});
+
+
+// --- backups ---------------------------------------------------------------------------------------
+
+describe('database backup and restore', () => {
+  const claim = (n: number): ClaimInput => ({ messageKey: `k${n}`, contentHash: `c${n}`, messageId: `<${n}@x>`, senderEmail: 'a@b.com', subject: `s${n}`, attachmentName: 'f.xlsx' });
+  const opts = { dedupeWindowHours: 48, maxAttempts: 3, staleProcessingMinutes: 15 };
+
+  it('takes a verified copy while the database is open, keeps only the newest N, and restores it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-backup-'));
+    const dbFile = path.join(dir, 'live.sqlite');
+    const backups = path.join(dir, 'backups');
+    const db = openDatabase(dbFile);
+    const repo = new Repository(db, opts);
+    for (const n of [1, 2]) {
+      const c = repo.claim(claim(n));
+      if (c.outcome === 'claimed') repo.finish(c.id, 'QUOTE_CREATED');
+    }
+
+    const t = (h: number) => new Date(Date.UTC(2026, 9, 20, h, 0, 0));
+    const first = await createBackup(db, backups, 2, t(1));
+    assert.match(path.basename(first.file), /^quote-agent-20261020-010000\.sqlite$/);
+    assert.equal(first.enquiries, 2);
+    assert.deepEqual(verifyBackup(first.file), { enquiries: 2 });
+
+    await createBackup(db, backups, 2, t(2));
+    const third = await createBackup(db, backups, 2, t(3));
+    assert.equal(listBackups(backups).length, 2, 'only the newest 2 are kept');
+    assert.deepEqual(third.removed, ['quote-agent-20261020-010000.sqlite']);
+
+    // the live database moves on; the restore brings back the state at the time of the newest backup
+    const c3 = repo.claim(claim(3));
+    if (c3.outcome === 'claimed') repo.finish(c3.id, 'QUOTE_CREATED');
+    db.close();
+    const restored = restoreBackup(third.file, dbFile, t(4));
+    assert.equal(restored.enquiries, 2);
+    assert.ok(restored.safetyCopy && fs.existsSync(restored.safetyCopy), 'the previous database is kept next to it');
+    const reopened = openDatabase(dbFile);
+    assert.equal((reopened.prepare('SELECT COUNT(*) AS n FROM enquiries').get() as { n: number }).n, 2);
+    reopened.close();
+  });
+
+  it('refuses a corrupt or foreign file and leaves the live database exactly as it was', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-backup-'));
+    const dbFile = path.join(dir, 'live.sqlite');
+    openDatabase(dbFile).close();
+    const before = fs.readFileSync(dbFile);
+    const bad = path.join(dir, 'quote-agent-20261020-010000.sqlite');
+    fs.writeFileSync(bad, 'this is not a database');
+    assert.throws(() => restoreBackup(bad, dbFile), /not a usable backup/);
+    assert.throws(() => restoreBackup(path.join(dir, 'missing.sqlite'), dbFile), /not a usable backup/);
+    assert.deepEqual(fs.readFileSync(dbFile), before);
+    assert.equal(fs.readdirSync(dir).some((f) => f.includes('before-restore')), false, 'nothing was moved or copied');
+  });
+});
+
+
+// --- review flags, dashboard fields, usage counters ----------------------------------------------------
+
+describe('review flags', () => {
+  const limits = { warnQuantityAbove: 100_000, warnTotalAbove: 5_000_000 };
+  const line = (rowNumber: number, sku: string | null, quantity: number, uom: string | null = 'pcs') => ({ rowNumber, sku, description: 'x', quantity, uomRaw: uom, uom });
+
+  it('flags absurd quantities and totals, fractional counted units, and repeated item codes', () => {
+    const f = reviewFindings([line(2, 'A', 1_200_000), line(3, 'B', 2.5), line(4, 'C', 5, 'm'), line(5, 'A', 3), line(6, 'D', 2.5, 'kg')], 296_580_860, 'INR', limits);
+    assert.deepEqual(f.map((x) => x.flag).sort(), ['DUPLICATE_ITEM', 'FRACTIONAL_UNITS', 'LARGE_QUANTITY', 'LARGE_TOTAL']);
+    assert.match(f.find((x) => x.flag === 'LARGE_QUANTITY')?.message ?? '', /row 2.*12,00,000/);
+    assert.match(f.find((x) => x.flag === 'FRACTIONAL_UNITS')?.message ?? '', /row 3/); // 2.5 kg is fine, 2.5 pcs is not
+    assert.match(f.find((x) => x.flag === 'DUPLICATE_ITEM')?.message ?? '', /rows 2 and 5/);
+  });
+
+  it('says nothing about an ordinary quote', () => {
+    assert.deepEqual(reviewFindings([line(2, 'A', 10), line(3, 'B', 300, 'm'), line(4, null, 4)], 44_167, 'INR', limits), []);
+  });
+
+  it('still creates the draft, warns Sales, and remembers the flag and the dashboard fields', async () => {
+    const t = await setup([acme], CATALOG);
+    const buf = await workbook([['Item Code', 'Description', 'Qty'], ['R-7A', 'Relay 7A', 2_000_000], ['R-7A', 'Relay 7A again', 2.5]]);
+    const res = await processRawMessage(t.rt, await email({ xlsx: buf }));
+    assert.match(res.results[0]?.outcome ?? '', /^quote_created/);
+    assert.equal(t.zoho.estimates.length, 1, 'a draft is never blocked');
+    const warnings = t.notifier.lastDraft?.warnings ?? [];
+    assert.ok(warnings.some((w) => /Unusually large quantity/.test(w)));
+    assert.ok(warnings.some((w) => /total .* unusually large/.test(w)));
+    assert.ok(warnings.some((w) => /same item code/.test(w)));
+
+    const row = t.rt.repo.get(res.results[0]?.enquiryId ?? 0);
+    assert.deepEqual([...(row?.reviewFlags ?? [])].sort(), ['DUPLICATE_ITEM', 'LARGE_QUANTITY', 'LARGE_TOTAL']);
+    assert.equal(row?.customerName, 'Acme Industries Pvt Ltd');
+    assert.equal(row?.matchTier, 'email');
+    assert.equal(row?.companyInEmail, 'Acme Industries Pvt Ltd');
+    assert.equal(row?.unreadableRows, 0);
+    assert.ok(row?.emailDate === null || typeof row?.emailDate === 'string');
+  });
+});
+
+describe('model usage counters', () => {
+  it('reports each call to the callback, and the repository adds them up per day and task', async () => {
+    const seen: Array<[string, number, number]> = [];
+    const cfg = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant-test', AI_MAX_RETRIES: '0' }).llm;
+    const stub = (async () =>
+      new Response(JSON.stringify({ id: 'm', type: 'message', role: 'assistant', model: 'claude-haiku-5-5', content: [{ type: 'text', text: '{}' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 40, output_tokens: 7 } }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+    const llm = new LlmClient(cfg, { fetch: stub, onUsage: (task, i, o) => seen.push([task, i, o]) });
+    await llm.text({ task: 'notice_wording', system: 's', user: 'u' });
+    assert.deepEqual(seen, [['notice_wording', 40, 7]]);
+
+    const repo = new Repository(openDatabase(':memory:'), { dedupeWindowHours: 48, maxAttempts: 3, staleProcessingMinutes: 15 });
+    repo.addLlmUsage('2026-10-20', 'email_extraction', 1, 900, 90);
+    repo.addLlmUsage('2026-10-20', 'email_extraction', 1, 1000, 100);
+    repo.addLlmUsage('2026-10-21', 'column_mapping', 1, 1200, 40);
+    assert.deepEqual(repo.llmUsageSince('2026-10-20'), [
+      { day: '2026-10-20', task: 'email_extraction', calls: 2, inputTokens: 1900, outputTokens: 190 },
+      { day: '2026-10-21', task: 'column_mapping', calls: 1, inputTokens: 1200, outputTokens: 40 },
+    ]);
+    assert.equal(repo.llmUsageSince('2026-10-21').length, 1);
+  });
+});
+
+
+// --- service health, alerts, daily summary, retention -----------------------------------------------------
+
+describe('service health, alerts, daily summary and retention', () => {
+  function world(start = '2026-10-20T10:00:00Z') {
+    let now = new Date(start);
+    const config = loadConfig({ NOTIFY_INTERNAL_EMAIL: 'sales@example.com', PUBLIC_DASHBOARD_URL: 'https://quotes.example.com/' });
+    const repo = new Repository(openDatabase(':memory:'), { dedupeWindowHours: 48, maxAttempts: 3, staleProcessingMinutes: 15, now: () => now });
+    return { config, repo, at: () => now, set: (iso: string) => (now = new Date(iso)), advance: (min: number) => (now = new Date(now.getTime() + min * 60_000)) };
+  }
+  let n = 0;
+  function enquiry(repo: Repository, status: 'QUOTE_CREATED' | 'QUOTE_CREATED_WITH_EXCEPTIONS' | 'NEEDS_INFO' | 'HALTED_CUSTOMER_NOT_FOUND', lines = 3, company?: string): number {
+    n++;
+    const c = repo.claim({ messageKey: `hk${n}`, contentHash: `hc${n}`, messageId: `<h${n}@x>`, senderEmail: `s${n}@x.com`, subject: `subject ${n}`, attachmentName: 'f.xlsx' });
+    if (c.outcome !== 'claimed') throw new Error('claim failed');
+    if (company) repo.setEmailInfo(c.id, { companyInEmail: company });
+    if (status.startsWith('QUOTE')) {
+      repo.recordEstimate(c.id, { customerId: 'C1', estimateId: `E${n}`, estimateNumber: `QT-${n}`, quoteUrl: 'https://z/x', totalAmount: 100, currencyCode: 'INR', lineCount: lines, matchedCount: lines, unmatchedCount: 0, customerName: 'Acme' });
+    }
+    repo.finish(c.id, status as 'QUOTE_CREATED');
+    return c.id;
+  }
+
+  it('is healthy after a good check, and unhealthy when checks go stale', async () => {
+    const w = world();
+    const monitor = new HealthMonitor(w.repo, w.config, new RecordingNotifier(), w.at);
+    assert.equal(computeHealth(w.repo, w.config, w.at()).ok, true, 'a fresh start is not an outage');
+    await monitor.recordCycle({ ok: true });
+    w.advance(10);
+    assert.equal(computeHealth(w.repo, w.config, w.at()).ok, true);
+    w.advance(10); // 20 minutes since the last good check, limit is 15
+    const stale = computeHealth(w.repo, w.config, w.at());
+    assert.equal(stale.ok, false);
+    assert.match(stale.reason ?? '', /no successful mailbox check for more than 15 minutes/);
+    await monitor.recordCycle({ ok: true });
+    assert.equal(computeHealth(w.repo, w.config, w.at()).ok, true);
+  });
+
+  it('emails once when checks keep failing, not on every failure, and once when it recovers', async () => {
+    const w = world();
+    const notifier = new RecordingNotifier();
+    const monitor = new HealthMonitor(w.repo, w.config, notifier, w.at);
+    await monitor.recordCycle({ ok: false, error: new Error('Invalid credentials') });
+    await monitor.recordCycle({ ok: false, error: new Error('Invalid credentials') });
+    assert.equal(notifier.alerts.length, 0, 'two failures are not yet an outage');
+    await monitor.recordCycle({ ok: false, error: new Error('Invalid credentials') });
+    assert.deepEqual(notifier.alerts.map((a) => a.kind), ['down']);
+    assert.match(notifier.alerts[0]?.detail ?? '', /Invalid credentials/);
+    await monitor.recordCycle({ ok: false, error: new Error('Invalid credentials') });
+    await monitor.recordCycle({ ok: false, error: new Error('Invalid credentials') });
+    assert.equal(notifier.alerts.length, 1, 'no repeat alerts during the same outage');
+    const health = computeHealth(w.repo, w.config, w.at());
+    assert.equal(health.ok, false);
+    assert.match(health.reason ?? '', /5 mailbox checks in a row failed/);
+
+    await monitor.recordCycle({ ok: true });
+    await monitor.recordCycle({ ok: true });
+    assert.deepEqual(notifier.alerts.map((a) => a.kind), ['down', 'recovered']);
+    assert.equal(computeHealth(w.repo, w.config, w.at()).ok, true);
+  });
+
+  it('builds the daily summary: counts, time saved, and what still needs a person', () => {
+    const w = world();
+    enquiry(w.repo, 'QUOTE_CREATED', 4);
+    enquiry(w.repo, 'QUOTE_CREATED_WITH_EXCEPTIONS', 3);
+    enquiry(w.repo, 'NEEDS_INFO');
+    enquiry(w.repo, 'HALTED_CUSTOMER_NOT_FOUND', 0, 'Totally New Traders');
+    w.repo.addLlmUsage('2026-10-20', 'email_extraction', 4, 4000, 400);
+    const s = buildDailySummary(w.repo, w.config, w.at());
+    assert.equal(s.received, 4);
+    assert.equal(s.drafts, 2);
+    assert.equal(s.draftsToPrice, 1);
+    assert.equal(s.timeSavedMinutes, 10 + 2 * 4 + (10 + 2 * 3)); // 10 min per enquiry + 2 per line, drafts only
+    assert.equal(s.needAttention.length, 2);
+    assert.match(s.needAttention.map((a) => a.reason).join(' | '), /Customer not found in Zoho \(company in the email: Totally New Traders\)/);
+    assert.equal(s.llm.calls, 4);
+    assert.ok(Math.abs(s.llm.estimatedUsd - (4000 * 0.1 + 400 * 0.5) / 1e6) < 1e-12);
+    assert.equal(s.dashboardUrl, 'https://quotes.example.com'); // trailing slash removed
+  });
+
+  it('deletes only old finished records, keeps recent ones and work in progress, and removes their trail', () => {
+    const w = world();
+    w.set('2025-09-01T10:00:00Z');
+    const old = enquiry(w.repo, 'QUOTE_CREATED');
+    n++;
+    const stuck = w.repo.claim({ messageKey: `hk${n}`, contentHash: `hc${n}`, messageId: `<h${n}@x>`, senderEmail: 'old@x.com', subject: 'still processing', attachmentName: null });
+    w.set('2026-10-20T10:00:00Z');
+    const recent = enquiry(w.repo, 'QUOTE_CREATED');
+    assert.ok(w.repo.auditTrail(old).length > 0);
+
+    assert.equal(runRetention(w.repo, 365, w.at()), 1);
+    assert.equal(w.repo.get(old), undefined);
+    assert.equal(w.repo.auditTrail(old).length, 0, 'the audit trail goes with the record');
+    assert.ok(w.repo.get(recent));
+    assert.ok(stuck.outcome === 'claimed' && w.repo.get(stuck.id), 'work in progress is never purged');
+    assert.equal(w.repo.getMeta('last_purge_count'), '1');
+  });
+
+  it('prepares the alert and summary emails for internal recipients only (and writes them to the log when SMTP is off)', async () => {
+    const w = world();
+    const notifier = new MailNotifier(w.config, new LlmClient(w.config.llm));
+    assert.deepEqual(await notifier.serviceAlert({ kind: 'down', detail: 'IMAP login failed', consecutiveFailures: 3 }), { delivered: false, dryRun: true });
+    assert.deepEqual(await notifier.dailySummary(buildDailySummary(w.repo, w.config, w.at())), { delivered: false, dryRun: true });
   });
 });

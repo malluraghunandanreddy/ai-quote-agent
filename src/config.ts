@@ -100,6 +100,38 @@ const EnvSchema = z
     MAX_ATTACHMENT_MB: int(15, 1, 100),
     MAX_EXCEL_ROWS: int(2000, 10, 100_000),
     PUBLIC_EMAIL_DOMAINS: csv(),
+
+    // Dashboard (read-only web page). Without a password only /healthz is served.
+    CLIENT_NAME: strDefault(''),
+    BRAND_NAME: strDefault('Quote assistant'),
+    BRAND_LOGO: str(),
+    BRAND_LOGO_ONLY: bool(false),
+    BRAND_COLOR: str(),
+    BRAND_FOOTER: str(),
+    SHOW_AI_COST: bool(false),
+    DASHBOARD_PASSWORD: str(),
+    DASHBOARD_OWNER_EMAIL: str(),
+    DASHBOARD_HOST: strDefault('127.0.0.1'),
+    DASHBOARD_PORT: int(3000, 1, 65535),
+    DASHBOARD_TRUST_PROXY: bool(false),
+    PUBLIC_DASHBOARD_URL: str(),
+
+    // Backups, retention, monitoring
+    BACKUP_DIR: strDefault('data/backups'),
+    BACKUP_KEEP: int(14, 1, 365),
+    BACKUP_CRON: strDefault('0 2 * * *'),
+    RETENTION_DAYS: int(365, 7, 3650),
+    DAILY_SUMMARY_CRON: strDefault('0 8 * * *'),
+    ALERT_AFTER_FAILURES: int(3, 1, 100),
+    HEALTH_STALE_MINUTES: int(15, 2, 1440),
+
+    // Review flags and the "time saved" estimate
+    WARN_QUANTITY_ABOVE: z.preprocess(blankToUndefined, z.coerce.number().positive().default(100_000)),
+    WARN_TOTAL_ABOVE: z.preprocess(blankToUndefined, z.coerce.number().positive().default(5_000_000)),
+    MANUAL_MINUTES_PER_ENQUIRY: z.preprocess(blankToUndefined, z.coerce.number().min(0).default(10)),
+    MANUAL_MINUTES_PER_LINE: z.preprocess(blankToUndefined, z.coerce.number().min(0).default(2)),
+    // What an hour of the client's quoting staff costs them, in the quote currency. Optional: turns hours saved into money.
+    STAFF_COST_PER_HOUR: z.preprocess(blankToUndefined, z.coerce.number().positive().optional()),
   })
   .superRefine((env, ctx) => {
     const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
@@ -134,6 +166,20 @@ const EnvSchema = z
       for (const address of list) {
         if (!z.email().safeParse(address).success) issue(name, `"${address}" is not a valid email address`);
       }
+    }
+    if (env.DASHBOARD_PASSWORD && env.DASHBOARD_PASSWORD.length < 10) {
+      issue('DASHBOARD_PASSWORD', 'must be at least 10 characters (it protects customer and quote information)');
+    }
+    if (env.BRAND_COLOR && !/^#[0-9a-fA-F]{6}$/.test(env.BRAND_COLOR)) {
+      issue('BRAND_COLOR', 'must be a hex colour like #0f7b6c (six digits)');
+    }
+    if (env.BRAND_NAME.length > 60) issue('BRAND_NAME', 'must be 60 characters or fewer');
+    if (env.BRAND_FOOTER && env.BRAND_FOOTER.length > 160) issue('BRAND_FOOTER', 'must be 160 characters or fewer');
+    if (env.DASHBOARD_OWNER_EMAIL && !/^[^\s@]+@[^\s@]+$/.test(env.DASHBOARD_OWNER_EMAIL)) {
+      issue('DASHBOARD_OWNER_EMAIL', 'must be an email address');
+    }
+    if (env.PUBLIC_DASHBOARD_URL && !/^https?:\/\/\S+$/.test(env.PUBLIC_DASHBOARD_URL)) {
+      issue('PUBLIC_DASHBOARD_URL', 'must start with http:// or https://');
     }
     // Claude settings are validated whenever a key is present or the LLM is forced on.
     if (env.ANTHROPIC_API_KEY || env.LLM_ENABLED === 'true') {
@@ -222,6 +268,26 @@ export interface Config {
     maxExcelRows: number;
   };
   publicDomains: ReadonlySet<string>;
+  dashboard: {
+    clientName: string;
+    /** The first owner's starting password. Used once, when nobody has a login yet; they must change it at first sign-in. */
+    password: string | undefined;
+    /** The first owner's email (their sign-in name). Falls back to the internal notification address. */
+    ownerEmail: string | undefined;
+    host: string;
+    port: number;
+    trustProxy: boolean;
+    publicUrl: string | undefined;
+    /** Show what the AI reading costs on the dashboard and in the daily summary email. Off by default. */
+    showAiCost: boolean;
+  };
+  /** How the dashboard looks: whose name and logo, which accent colour. All optional. */
+  brand: { name: string; logoPath: string | undefined; logoOnly: boolean; color: string | undefined; footer: string | undefined };
+  backup: { dir: string; keep: number; cron: string };
+  retentionDays: number;
+  alerts: { dailySummaryCron: string | null; failuresBeforeAlert: number; staleMinutes: number };
+  review: { warnQuantityAbove: number; warnTotalAbove: number };
+  roi: { minutesPerEnquiry: number; minutesPerLine: number; staffCostPerHour: number | undefined };
 }
 
 export class ConfigError extends Error {
@@ -314,6 +380,26 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       maxExcelRows: e.MAX_EXCEL_ROWS,
     },
     publicDomains: new Set([...DEFAULT_PUBLIC_DOMAINS, ...e.PUBLIC_EMAIL_DOMAINS.map((d) => d.toLowerCase())]),
+    dashboard: {
+      clientName: e.CLIENT_NAME,
+      password: e.DASHBOARD_PASSWORD,
+      ownerEmail: e.DASHBOARD_OWNER_EMAIL?.toLowerCase(),
+      host: e.DASHBOARD_HOST,
+      port: e.DASHBOARD_PORT,
+      trustProxy: e.DASHBOARD_TRUST_PROXY,
+      publicUrl: e.PUBLIC_DASHBOARD_URL?.replace(/\/+$/, ''),
+      showAiCost: e.SHOW_AI_COST,
+    },
+    brand: { name: e.BRAND_NAME, logoPath: e.BRAND_LOGO, logoOnly: e.BRAND_LOGO_ONLY, color: e.BRAND_COLOR?.toLowerCase(), footer: e.BRAND_FOOTER },
+    backup: { dir: e.BACKUP_DIR, keep: e.BACKUP_KEEP, cron: e.BACKUP_CRON },
+    retentionDays: e.RETENTION_DAYS,
+    alerts: {
+      dailySummaryCron: /^(off|none|disabled|false)$/i.test(e.DAILY_SUMMARY_CRON) ? null : e.DAILY_SUMMARY_CRON,
+      failuresBeforeAlert: e.ALERT_AFTER_FAILURES,
+      staleMinutes: e.HEALTH_STALE_MINUTES,
+    },
+    review: { warnQuantityAbove: e.WARN_QUANTITY_ABOVE, warnTotalAbove: e.WARN_TOTAL_ABOVE },
+    roi: { minutesPerEnquiry: e.MANUAL_MINUTES_PER_ENQUIRY, minutesPerLine: e.MANUAL_MINUTES_PER_LINE, staffCostPerHour: e.STAFF_COST_PER_HOUR },
   };
 }
 

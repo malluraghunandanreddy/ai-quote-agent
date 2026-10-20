@@ -78,12 +78,9 @@ Failures are recorded as `FAILED`, the email stays unread, and the next poll ret
 
 ## What has and has not been run against live services
 
-- **Zoho** reads (token refresh, customer and item lookups) have been run live against your org; sample customers and items were created there.
-- **Claude Haiku 5.5:** covered by unit tests with the HTTP stubbed (exact request shape, refusal / truncation / bad-JSON fallbacks). The first live
-  run needs `ANTHROPIC_API_KEY` in `.env`. (An earlier version of this layer ran live against Claude; that code has been removed.)
-- **Not yet live:** IMAP polling, SMTP delivery, and Zoho **writes** (draft creation). Zoho details to confirm on the first live draft:
-  `reference_number` on `/estimates`, `sku` / `status` fields on `/items`, and that an estimate without a line `rate` is priced by Zoho
-  (else set `ZOHO_SEND_ITEM_RATE=true`).
+- **Zoho Books** (your test organisation): token refresh, customer and item lookups, and **draft creation** have run live. Sample customers and items were created there, and drafts were created from the 13 messy sample emails (the duplicates from early runs were deleted with your approval; QT-000017 to QT-000026 remain).
+- **Claude Haiku 5.5:** run live on the 13 messy emails (all 13 read correctly), and covered by unit tests with the HTTP stubbed (request shape, refusal / truncation / bad-JSON fallbacks).
+- **Not yet live:** IMAP polling and SMTP delivery against a real mailbox (no mailbox credentials have been set up), the client's own Zoho organisation (the test one is not GST-registered), and the Docker image.
 
 ## Model calls: what they cost and how few there are
 
@@ -128,3 +125,65 @@ quote to the wrong customer is worse than asking.
 **Zoho orgs that are not GST-registered** reject `place_of_contact`; customers are then created without a Place of Supply, quotes carry
 no tax, and the "no Place of Supply" warning is suppressed.
 
+
+## The dashboard, logins and roles
+
+The service also serves a dashboard (default `http://127.0.0.1:3000`; `npm run dashboard` runs it alone, `npm run demo` shows it with sample data). Everyone signs in with **their own email and password**, so every note and change shows who did it. Nothing the dashboard does can change a quote, send an email or touch Zoho: it writes only logins, team notes and its own activity log, all in the local database.
+
+### Who can do what
+
+| | Viewer | Staff | Manager | Owner |
+|---|:-:|:-:|:-:|:-:|
+| Overview, enquiries and their step-by-step trail | ✓ | ✓ | ✓ | ✓ |
+| Add notes, mark enquiries handled or reopen them | | ✓ | ✓ | ✓ |
+| Download an enquiry list (CSV) | | | ✓ | ✓ |
+| System status and settings | | | ✓ | ✓ |
+| See the team; add people, change roles, reset passwords | | | ✓ (staff and viewers only) | ✓ (everyone) |
+| Activity log (sign-ins, access changes, downloads, notes) | | | | ✓ |
+
+The rules live in one place, `src/auth/rbac.ts`; the Team page prints the same table from it. A person's role is read on every request, so a change applies at once; switching someone off or resetting their password signs them out everywhere. There is always at least one active owner (the last one cannot be demoted or switched off). Nobody changes their own role.
+
+### How it is protected
+
+- Passwords are stored as salted scrypt hashes, never in clear; at least 10 characters, common ones refused.
+- New people get a generated one-time password (shown once, to the person who created the login) and must choose their own at first sign-in.
+- Five wrong passwords pause a login for 15 minutes; eight wrong attempts from one address pause that address. The error message is the same whether or not the email exists.
+- Sessions live in the database (only a fingerprint of the cookie is stored), last 12 hours, and end after 4 idle hours. The cookie is `HttpOnly` and `SameSite=Strict` (and `Secure` over HTTPS).
+- Every change form carries a per-session token and is checked against the site's own address; CSV downloads neutralise spreadsheet formulas.
+- The page security policy forbids inline scripts and styles and any third-party address.
+
+### Getting the first login, and getting back in
+
+1. Set `DASHBOARD_PASSWORD` and `DASHBOARD_OWNER_EMAIL` in `.env`, start the service once, sign in, choose a new password, then delete `DASHBOARD_PASSWORD` from `.env`. **Or** on the server: `npm run users -- add you@company.com "Your Name" owner`.
+2. Forgotten owner password: `npm run users -- reset you@company.com` prints a new one-time password. Other commands: `npm run users` (list), `-- role`, `-- off`, `-- on`, `-- unlock`, `-- passwd` (type a chosen password).
+
+### What the service now does on its own
+
+Besides polling the mailbox: nightly backup (`BACKUP_CRON`, also at startup if the last one is over a day old), then the retention purge; the morning summary email (`DAILY_SUMMARY_CRON`); an email to the team after `ALERT_AFTER_FAILURES` failed mailbox checks in a row, and another when it recovers; and `/healthz` (public, no details) for uptime monitors. See `.env.example` for every setting.
+
+### Branding: your name, or the client's
+
+Everything is settings, no code changes (see `.env.example`):
+
+| Setting | What it changes |
+|---|---|
+| `BRAND_NAME` | The product name in the top bar, browser tab titles and the sign-in page (default "Quote assistant") |
+| `CLIENT_NAME` | The client's company, shown after the name and in the overview greeting |
+| `BRAND_LOGO` | Path to a logo file (.png .jpg .gif .webp .svg, up to 1 MB). Shown in the top bar and on the sign-in page |
+| `BRAND_LOGO_ONLY` | `true` hides the text name so a logo that already says the name is not repeated |
+| `BRAND_COLOR` | Accent colour (`#rrggbb`) for buttons, links, the active menu and the top band. Too light for white button text? It is darkened until readable |
+| `BRAND_FOOTER` | One small line under every page, such as "Powered by Your Company" |
+
+Put the logo file somewhere on the server (for example a `branding/` folder next to the project; with Docker, mount it) and point `BRAND_LOGO` at it. A wide logo about 30 px tall works best; SVG stays sharp on every screen. A bad logo file or colour is skipped with a warning in the log; the dashboard still starts. Chart colours deliberately do not follow the accent, so charts stay readable and colour-blind safe on any brand.
+
+**Two common set-ups.** Selling it under your own name: `BRAND_NAME` and `BRAND_LOGO` are yours, `CLIENT_NAME` is the client, `BRAND_FOOTER` can be empty. White-labelled for the client: `BRAND_NAME`, `BRAND_LOGO` and `BRAND_COLOR` are theirs, and `BRAND_FOOTER` is "Powered by your company" or left empty.
+
+**Not covered by these settings:** the wording and sender name of the alert emails (the sender is `SMTP_FROM`), and the PDF a customer finally receives, which is designed in Zoho Books (Settings, then Customisation, then PDF templates). Try a look without touching real data: `BRAND_NAME="Acme Quotes" BRAND_LOGO=branding/sample-logo.svg BRAND_COLOR="#0f7b6c" npm run demo`.
+
+### Running it for a client (Docker)
+
+`deploy/README.md` is the step-by-step guide: build the image, set up the shared HTTPS proxy once per server, `deploy/new-client.sh` for each client, then `./ctl.sh check`, `up`, `status`. **It has not been run in Docker yet** (the build steps and a production-only run were checked without Docker), so do a first run on a spare server with a throwaway client.
+
+### Still to do for a client rollout
+
+A first real Docker run, a real mailbox and SMTP test, the client's own Zoho organisation (the sample runs used the shared test organisation), and off-server copies of the nightly backups.

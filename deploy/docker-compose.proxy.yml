@@ -1,0 +1,14 @@
+# Added (COMPOSE_FILE in .env) when several clients share one server and one HTTPS front door (deploy/proxy).
+# It only joins the app to the shared "quote-proxy" network under a name the proxy can reach.
+services:
+  app:
+    networks:
+      default: {}
+      proxy:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME:?set by new-client.sh}-app
+
+networks:
+  proxy:
+    name: quote-proxy
+    external: true

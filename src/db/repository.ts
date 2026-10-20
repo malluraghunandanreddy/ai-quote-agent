@@ -21,6 +21,12 @@ export interface Enquiry {
   matchedCount: number | null;
   unmatchedCount: number | null;
   error: string | null;
+  customerName: string | null;
+  matchTier: string | null;
+  companyInEmail: string | null;
+  emailDate: string | null;
+  unreadableRows: number | null;
+  reviewFlags: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -55,6 +61,11 @@ export interface EstimateRecord {
   lineCount: number;
   matchedCount: number;
   unmatchedCount: number;
+  customerName?: string;
+  matchTier?: string;
+  unreadableRows?: number;
+  /** Things Sales should double-check (large quantity, large total ...). */
+  reviewFlags?: string[];
 }
 
 export interface RepositoryOptions {
@@ -85,6 +96,12 @@ interface EnquiryRow {
   matched_count: number | null;
   unmatched_count: number | null;
   error: string | null;
+  customer_name: string | null;
+  match_tier: string | null;
+  company_in_email: string | null;
+  email_date: string | null;
+  unreadable_rows: number | null;
+  review_flags: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -110,6 +127,12 @@ function toEnquiry(r: EnquiryRow): Enquiry {
     matchedCount: r.matched_count,
     unmatchedCount: r.unmatched_count,
     error: r.error,
+    customerName: r.customer_name,
+    matchTier: r.match_tier,
+    companyInEmail: r.company_in_email,
+    emailDate: r.email_date,
+    unreadableRows: r.unreadable_rows,
+    reviewFlags: r.review_flags ? r.review_flags.split(',').filter(Boolean) : [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -127,6 +150,11 @@ export class Repository {
     // BEGIN IMMEDIATE: the read-check-insert below is atomic even with two processes on the same file.
     const tx = db.transaction((input: ClaimInput) => this.claimInTransaction(input));
     this.claimTx = (input) => tx.immediate(input);
+  }
+
+  /** The underlying database, for the stores that live beside this one (users, notes). */
+  get database(): Db {
+    return this.db;
   }
 
   /**
@@ -208,7 +236,8 @@ export class Repository {
     this.db
       .prepare(
         `UPDATE enquiries SET zoho_customer_id = ?, zoho_estimate_id = ?, estimate_number = ?, quote_url = ?,
-           total_amount = ?, currency_code = ?, line_count = ?, matched_count = ?, unmatched_count = ?, updated_at = ?
+           total_amount = ?, currency_code = ?, line_count = ?, matched_count = ?, unmatched_count = ?,
+           customer_name = ?, match_tier = ?, unreadable_rows = ?, review_flags = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -221,6 +250,10 @@ export class Repository {
         rec.lineCount,
         rec.matchedCount,
         rec.unmatchedCount,
+        rec.customerName ?? null,
+        rec.matchTier ?? null,
+        rec.unreadableRows ?? null,
+        (rec.reviewFlags ?? []).join(',') || null,
         this.now().toISOString(),
         id,
       );
@@ -255,6 +288,99 @@ export class Repository {
       .prepare('INSERT OR IGNORE INTO notifications (enquiry_id, kind, sent_at) VALUES (?, ?, ?)')
       .run(id, kind, this.now().toISOString());
     this.writeAudit(id, `NOTIFIED_${kind}`, null);
+  }
+
+  /** What was read from the email itself (no body text is stored). */
+  setEmailInfo(id: number, info: { companyInEmail?: string | null; emailDate?: Date | null; customerName?: string | null; matchTier?: string | null }): void {
+    this.db
+      .prepare(
+        `UPDATE enquiries SET company_in_email = COALESCE(?, company_in_email), email_date = COALESCE(?, email_date),
+           customer_name = COALESCE(?, customer_name), match_tier = COALESCE(?, match_tier), updated_at = ? WHERE id = ?`,
+      )
+      .run(
+        info.companyInEmail ?? null,
+        info.emailDate && info.emailDate.getTime() > 0 ? info.emailDate.toISOString() : null,
+        info.customerName ?? null,
+        info.matchTier ?? null,
+        this.now().toISOString(),
+        id,
+      );
+  }
+
+  // --- service state (last poll, last backup, session key ...) -----------------------------------
+
+  getMeta(key: string): string | undefined {
+    return this.db.prepare<[string], { value: string }>('SELECT value FROM app_meta WHERE key = ?').get(key)?.value;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db
+      .prepare(
+        'INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+      )
+      .run(key, value, this.now().toISOString());
+  }
+
+  // --- model usage ---------------------------------------------------------------------------------
+
+  addLlmUsage(day: string, task: string, calls: number, inputTokens: number, outputTokens: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO llm_usage_daily (day, task, calls, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(day, task) DO UPDATE SET calls = calls + excluded.calls,
+           input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens`,
+      )
+      .run(day, task, calls, inputTokens, outputTokens);
+  }
+
+  llmUsageSince(day: string): Array<{ day: string; task: string; calls: number; inputTokens: number; outputTokens: number }> {
+    return this.db
+      .prepare<[string], { day: string; task: string; calls: number; input_tokens: number; output_tokens: number }>(
+        'SELECT day, task, calls, input_tokens, output_tokens FROM llm_usage_daily WHERE day >= ? ORDER BY day, task',
+      )
+      .all(day)
+      .map((r) => ({ day: r.day, task: r.task, calls: r.calls, inputTokens: r.input_tokens, outputTokens: r.output_tokens }));
+  }
+
+  // --- reading for the dashboard and the daily summary ------------------------------------------------
+
+  /** Everything received since `iso` (newest first). Volumes are hundreds a month, so this stays small. */
+  enquiriesSince(iso: string, limit = 20_000): Enquiry[] {
+    return this.db
+      .prepare<[string, number], EnquiryRow>('SELECT * FROM enquiries WHERE created_at >= ? ORDER BY id DESC LIMIT ?')
+      .all(iso, limit)
+      .map(toEnquiry);
+  }
+
+  listEnquiries(opts: { statuses?: EnquiryStatus[]; flaggedOnly?: boolean; limit: number; offset: number }): { rows: Enquiry[]; total: number } {
+    const statuses = opts.statuses && opts.statuses.length > 0 ? opts.statuses : null;
+    const conditions = [...(statuses ? [`status IN (${statuses.map(() => '?').join(',')})`] : []), ...(opts.flaggedOnly ? ["review_flags IS NOT NULL AND review_flags <> ''"] : [])];
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const args: unknown[] = statuses ? [...statuses] : [];
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM enquiries ${where}`).get(...args) as { n: number }).n;
+    const rows = (this.db
+      .prepare(`SELECT * FROM enquiries ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
+      .all(...args, opts.limit, opts.offset) as EnquiryRow[]).map(toEnquiry);
+    return { rows, total };
+  }
+
+  notificationsFor(id: number): Array<{ kind: string; sentAt: string }> {
+    return this.db
+      .prepare<[number], { kind: string; sent_at: string }>('SELECT kind, sent_at FROM notifications WHERE enquiry_id = ? ORDER BY sent_at')
+      .all(id)
+      .map((r) => ({ kind: r.kind, sentAt: r.sent_at }));
+  }
+
+  // --- retention -----------------------------------------------------------------------------------
+
+  /** Delete enquiries (and their audit trail and notification records) older than the cutoff. Never touches work in progress. */
+  purgeOlderThan(cutoffIso: string): number {
+    const tx = this.db.transaction((cutoff: string) => {
+      const removed = this.db.prepare("DELETE FROM enquiries WHERE created_at < ? AND status != 'PROCESSING'").run(cutoff).changes;
+      this.db.prepare('DELETE FROM audit_log WHERE at < ? AND enquiry_id IS NULL').run(cutoff);
+      return removed;
+    });
+    return tx(cutoffIso);
   }
 
   audit(id: number | null, event: string, detail?: string): void {
