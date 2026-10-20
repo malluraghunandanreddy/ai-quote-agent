@@ -180,6 +180,12 @@ Put the logo file somewhere on the server (for example a `branding/` folder next
 
 **Not covered by these settings:** the wording and sender name of the alert emails (the sender is `SMTP_FROM`), and the PDF a customer finally receives, which is designed in Zoho Books (Settings, then Customisation, then PDF templates). Try a look without touching real data: `BRAND_NAME="Acme Quotes" BRAND_LOGO=branding/sample-logo.svg BRAND_COLOR="#0f7b6c" npm run demo`.
 
+### Checking the live set-up, and the demo emails
+
+- `npm run preflight` tries the real mailbox login, the alert-email login and Zoho Books, lists any unread emails the assistant would pick up, and says in plain words what is wrong. It never processes mail. `npm run preflight -- --send` also sends one test message to the internal address.
+- `npm run demo:kit` writes `demo-emails/`: four ready-to-send emails with Excel files (a complete draft, an item missing from the catalogue, a customer not in Zoho, no attachment). `-- --check` runs them through the real processing code against a read-only copy of your Zoho customers and items, creating nothing and sending nothing. Make fresh files before each recording: the same file re-sent from the same address within 48 hours is ignored as a duplicate.
+- **Automatic mail is never an enquiry.** Every alert carries `Auto-Submitted` / `X-Quote-Assistant` markers, and the assistant skips (and marks read) anything carrying them, plus auto-replies, bounces, and mail from its own sending address with no Excel attached. Without this, an alert delivered into the monitored mailbox could be read as a new enquiry and trigger another alert on every poll.
+
 ### Running it for a client (Docker)
 
 `deploy/README.md` is the step-by-step guide: build the image, set up the shared HTTPS proxy once per server, `deploy/new-client.sh` for each client, then `./ctl.sh check`, `up`, `status`. **It has not been run in Docker yet** (the build steps and a production-only run were checked without Docker), so do a first run on a spare server with a throwaway client.

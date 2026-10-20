@@ -14,6 +14,7 @@ import { IDLE_HOURS, MAX_FAILURES, NoteStore, SESSION_HOURS, UserError, UserStor
 import { accentTokens, contrastWithWhite, loadBrand } from '../src/dashboard/brand';
 import { overview } from '../src/dashboard/data';
 import { buildDailySummary } from '../src/ops/monitor';
+import { explainConnectionError } from '../src/ops/preflight';
 import { createDashboardServer } from '../src/dashboard/server';
 import { setLogLevel } from '../src/logger';
 
@@ -829,6 +830,25 @@ describe('savings shown to the client', () => {
     assert.deepEqual(s.timeSavedValue, { amount: 200, currency: 'INR' });
     assert.equal(buildDailySummary(repo, loadConfig(base), now).timeSavedValue, undefined);
     db.close();
+  });
+});
+
+describe('mailbox pre-flight messages', () => {
+  const say = (err: object, what: 'IMAP' | 'SMTP' = 'IMAP', host = 'imappro.zoho.in'): string => explainConnectionError(err, what, host);
+
+  it('says what to do for the failures people actually hit', () => {
+    assert.match(say({ code: 'ENOTFOUND' }), /was not found.*IMAP_HOST/);
+    assert.match(say({ code: 'EDNS', message: 'getaddrinfo ENOTFOUND x' }, 'SMTP', 'x'), /was not found.*SMTP_HOST/);
+    assert.match(say({ code: 'ECONNREFUSED' }, 'SMTP', 'h'), /Could not reach h.*SMTP_PORT.*587/);
+    assert.match(say({ code: 'ETIMEDOUT' }), /Could not reach.*993/);
+    assert.match(say({ authenticationFailed: true, response: 'Invalid credentials' }), /refused the login.*IMAP access.*app password|app-specific/is);
+    assert.match(say({ code: 'EAUTH', response: '535 Authentication failed' }, 'SMTP', 'smtppro.zoho.in'), /refused the login.*Zoho Accounts/s);
+    assert.match(say({ code: 'DEPTH_ZERO_SELF_SIGNED_CERT', message: 'self-signed certificate' }), /certificate/);
+  });
+
+  it('only mentions Zoho settings for Zoho hosts, and falls back to the raw message otherwise', () => {
+    assert.doesNotMatch(say({ authenticationFailed: true }, 'IMAP', 'imap.gmail.com'), /Zoho/);
+    assert.equal(say(new Error('something odd'), 'IMAP', 'h'), 'something odd');
   });
 });
 

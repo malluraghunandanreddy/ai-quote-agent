@@ -100,6 +100,7 @@ export type UnitOutcome =
   | 'needs_info'
   | 'halted_customer'
   | 'duplicate'
+  | 'ignored_automatic'
   | 'in_progress'
   | 'failed_will_retry'
   | 'failed_exhausted';
@@ -118,6 +119,7 @@ const FINAL: ReadonlySet<UnitOutcome> = new Set<UnitOutcome>([
   'needs_info',
   'halted_customer',
   'duplicate',
+  'ignored_automatic',
   'failed_exhausted',
 ]);
 
@@ -518,6 +520,15 @@ export async function processRawMessage(rt: Runtime, source: Buffer): Promise<Me
     const alerted = await alertFailure(rt, stub, message, attempts);
     const outcome: UnitOutcome = alerted ? 'failed_exhausted' : 'failed_will_retry';
     return { handled: alerted, messageId, results: [{ attachment: null, outcome, enquiryId: claim.id }] };
+  }
+
+  // Never treat automatic mail as an enquiry. Without this, an alert that lands in the monitored mailbox would be read
+  // as a new enquiry, trigger another alert, and so on every poll.
+  const own = (rt.config.notify.from.match(/<([^>]+)>/)?.[1] ?? rt.config.notify.from).trim().toLowerCase();
+  const automatic = mail.automatic ?? (mail.excelAttachments.length === 0 && mail.from.address === own ? "sent from this assistant's own alert address with nothing attached" : null);
+  if (automatic) {
+    logger.info('Skipped an automatic email (it is flagged as read and not treated as an enquiry)', { from: mail.from.address, subject: mail.subject.slice(0, 80), reason: automatic });
+    return { handled: true, messageId: mail.messageId, results: [{ attachment: null, outcome: 'ignored_automatic' }] };
   }
 
   const units: Unit[] =

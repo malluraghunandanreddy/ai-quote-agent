@@ -293,8 +293,12 @@ async function main(): Promise<void> {
     db.close();
     process.exit(0);
   };
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      console.log(`\nStopping the demo (${signal}).`);
+      void stop();
+    });
+  }
 }
 
 if (require.main === module) {

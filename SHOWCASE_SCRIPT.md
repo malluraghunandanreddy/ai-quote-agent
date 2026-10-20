@@ -225,6 +225,9 @@ On **Status** (as Karthik): **point at** Mailbox, Zoho Books, Claude, Alert emai
 
 ---
 
-## If you also want to show a live email turning into a draft
+## The live email turning into a draft
 
-This is **not ready yet**: it needs the real mailbox (IMAP) and alert-email (SMTP) settings in `.env`, which are empty. Once they are filled in: send an email with an Excel attached to the monitored inbox, run `npm run process-now`, and the draft appears in Zoho Books within seconds. To see it in the dashboard, start `npm run dashboard` (this reads the real data, not the sample) after creating an owner login with `npm run users -- add you@company.com "Your Name" owner`. Try it once yourself before showing a client.
+`VIDEO_SCRIPT.md` covers this end to end, both for recording a video and for showing it live:
+- `npm run preflight -- --send` checks the mailbox, the alert-email login and Zoho Books before you start, in plain words.
+- `npm run demo:kit -- --check` makes four ready-to-send emails with Excel files and proves they behave as described.
+- The mailbox settings in `.env` (`IMAP_HOST`, `IMAP_PASSWORD`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`) are still empty, so this has not run live yet. Try it once yourself before showing a client.

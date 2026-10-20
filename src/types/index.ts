@@ -38,6 +38,8 @@ export interface InboundMail {
   excelAttachments: MailAttachment[];
   /** Spreadsheet-like attachments we cannot read (e.g. legacy .xls), by file name. */
   unsupportedAttachments: string[];
+  /** Why this looks like automatic mail (our own alert, an auto-reply, a bounce), or null for a normal message. */
+  automatic?: string | null;
 }
 
 export interface EnquiryMeta {

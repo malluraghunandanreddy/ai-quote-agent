@@ -426,6 +426,8 @@ export class MailNotifier implements Notifier {
       subject: oneLine(doc.subject, 200),
       text,
       html: renderHtml(doc),
+      // Marks this as automatic mail so that, if it lands in the monitored mailbox, it is never read as an enquiry.
+      headers: { 'Auto-Submitted': 'auto-generated', 'X-Quote-Assistant': 'alert', Precedence: 'bulk', 'X-Auto-Response-Suppress': 'All' },
     };
     for (let attempt = 1; ; attempt++) {
       try {

@@ -105,6 +105,22 @@ export interface ParseMailOptions {
   maxAttachmentBytes: number;
 }
 
+/** Why a message looks automatic (never an enquiry), or null. Alerts carry these markers so they are never read as RFQs. */
+export function automaticReason(headers: Map<string, unknown>, senderAddress: string): string | null {
+  const text = (name: string): string => {
+    const v = headers.get(name);
+    return (typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v)).toLowerCase().trim();
+  };
+  if (headers.has('x-quote-assistant')) return "one of this assistant's own alert emails";
+  const auto = text('auto-submitted');
+  if (auto && auto !== 'no') return `an automatic message (Auto-Submitted: ${auto})`;
+  const precedence = text('precedence');
+  if (['bulk', 'junk', 'auto_reply', 'list'].includes(precedence)) return `bulk or automatic mail (Precedence: ${precedence})`;
+  if (headers.has('x-autoreply') || headers.has('x-autorespond')) return 'an automatic reply';
+  if (/^(mailer-daemon|postmaster)@/i.test(senderAddress)) return 'a delivery failure notice';
+  return null;
+}
+
 export async function parseRawEmail(source: Buffer, options: ParseMailOptions): Promise<InboundMail> {
   const parsed = await simpleParser(source);
 
@@ -145,5 +161,6 @@ export async function parseRawEmail(source: Buffer, options: ParseMailOptions): 
     isReply: Boolean(parsed.inReplyTo) || references.length > 0,
     excelAttachments,
     unsupportedAttachments,
+    automatic: automaticReason(parsed.headers, sender.address),
   };
 }
