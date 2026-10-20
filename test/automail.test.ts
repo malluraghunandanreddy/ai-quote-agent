@@ -93,6 +93,21 @@ describe('the assistant does not read its own alerts, even when they land in the
     }
   });
 
+  it('handles a plain enquiry written from the same address as the alerts (one-address demo), but not an alert coming back', async () => {
+    const { rt, sent } = setup();
+    try {
+      const plain = await raw({ from: 'quotes@acme.test', subject: 'quote please', text: 'please quote' });
+      assert.equal((await processRawMessage(rt, plain)).results[0]?.outcome, 'needs_info', 'a real enquiry from that address is processed');
+      assert.equal(sent.length, 1);
+      const back = await new Promise<Buffer>((resolve, reject) => new MailComposer(sent[0] as never).compile().build((e, m) => (e ? reject(e) : resolve(m))));
+      assert.equal((await processRawMessage(rt, back)).results[0]?.outcome, 'ignored_automatic', 'the alert that results is not');
+      assert.equal(sent.length, 1);
+    } finally {
+      rt.close();
+      mock.restoreAll();
+    }
+  });
+
   it('still handles a real enquiry sent from the same mailbox when it carries an Excel file (a self-test)', async () => {
     const { rt } = setup();
     try {

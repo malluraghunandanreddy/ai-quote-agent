@@ -846,6 +846,13 @@ describe('mailbox pre-flight messages', () => {
     assert.match(say({ code: 'DEPTH_ZERO_SELF_SIGNED_CERT', message: 'self-signed certificate' }), /certificate/);
   });
 
+  it('tells Gmail users to use an app password', () => {
+    const msg = say({ code: 'EAUTH', response: '535-5.7.8 Username and Password not accepted' }, 'SMTP', 'smtp.gmail.com');
+    assert.match(msg, /refused the login/);
+    assert.match(msg, /App passwords/);
+    assert.doesNotMatch(msg, /Zoho/);
+  });
+
   it('only mentions Zoho settings for Zoho hosts, and falls back to the raw message otherwise', () => {
     assert.doesNotMatch(say({ authenticationFailed: true }, 'IMAP', 'imap.gmail.com'), /Zoho/);
     assert.equal(say(new Error('something odd'), 'IMAP', 'h'), 'something odd');

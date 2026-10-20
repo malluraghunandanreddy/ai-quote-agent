@@ -37,7 +37,8 @@ export function explainConnectionError(err: unknown, what: 'IMAP' | 'SMTP', host
     return `The security certificate of ${host} was not accepted. The host name is probably not the one the provider gave you.`;
   }
   if (e.authenticationFailed || e.code === 'EAUTH' || /auth|credential|login|535|password/.test(text)) {
-    return `${host} refused the login. The usual causes: a wrong password; ${what === 'IMAP' ? 'IMAP access switched off in the mail account settings; ' : ''}or an app-specific password is needed because the account uses two-step sign-in.${zoho ? ' In Zoho Mail, turn on IMAP access in the mail settings, and create an app password under Zoho Accounts, Security.' : ''}`;
+    const gmail = /gmail|google/i.test(host);
+    return `${host} refused the login. The usual causes: a wrong password; ${what === 'IMAP' ? 'IMAP access switched off in the mail account settings; ' : ''}or an app-specific password is needed because the account uses two-step sign-in.${zoho ? ' In Zoho Mail, turn on IMAP access in the mail settings, and create an app password under Zoho Accounts, Security.' : ''}${gmail ? ' Gmail does not accept the normal account password here: turn on 2-Step Verification, create an app password (Google Account, Security, App passwords), and type it without spaces.' : ''}`;
   }
   return `${errorMessage(err)}`;
 }

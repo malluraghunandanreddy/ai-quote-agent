@@ -225,9 +225,44 @@ On **Status** (as Karthik): **point at** Mailbox, Zoho Books, Claude, Alert emai
 
 ---
 
-## The live email turning into a draft
+## Live, with the client sending their own email
 
-`VIDEO_SCRIPT.md` covers this end to end, both for recording a video and for showing it live:
-- `npm run preflight -- --send` checks the mailbox, the alert-email login and Zoho Books before you start, in plain words.
+You can ask the client to send an email from **their own address** during the call, and watch it turn into a draft on your screen. The sender's real mail ID shows up in the dashboard. Three things must be true beforehand, or the result will be less impressive:
+
+1. **They send to the right address:** `yourname+rfq@gmail.com` (not `yourname@gmail.com`). The "+rfq" part makes Gmail file it under the `RFQ-Demo` label, which is the only place the assistant reads. If they send to the plain address instead, it lands in your Inbox and the assistant never sees it. Fix on the spot: open it in Gmail, apply the label `RFQ-Demo`, and mark it unread. A few corporate mail systems reject a "+" in an address; if theirs does, use that same fix, or add a Gmail filter beforehand for `from:@theirdomain.com` that applies `RFQ-Demo`.
+2. **They exist as a customer in your Zoho Books.** Otherwise the honest result is "Customer not found" (no draft, an alert to your team). That is still a good thing to show, but it is not the draft you want to lead with. Before the call, ask for their company name and the address they will send from, and create a customer for them in Zoho Books (name, for example "Their Company (DEMO)", with that email as the contact email). The assistant then matches by sender email. I can create it for you if you tell me the details and say go ahead.
+3. **The items in their Excel exist in your catalogue.** Send them one of the ready-made Excel files beforehand (`npm run demo:kit` makes fresh ones; the item codes in them exist in your Zoho). Result: a complete priced draft. If you then let them send **their own** Excel, the assistant reads their lines, but your catalogue won't contain their items, so every line is marked "manual pricing required". That honestly shows how it reads a stranger's file and never invents a price. Do the prepared file first, their own file second, and only if you have rehearsed it.
+
+### A message you can send them beforehand
+
+> Subject: Quick live test during our call
+>
+> During our call, please send an email from your normal work address to **yourname+rfq@gmail.com**. Write it like a normal quote request, with your company name in the signature, and attach the Excel (.xlsx) list I'm sending you. You won't get a reply: the system never emails customers. We'll watch it appear on my screen. The text of the email is read by an AI service to understand it, and we keep only a short log of what happened. I'll delete the draft quote afterwards.
+
+(Tell them about the AI reading and the draft up front. It is their data and their consent.)
+
+### On the call
+
+1. Share your screen: Gmail on the `RFQ-Demo` label, the dashboard, Zoho Books Quotes, and Gmail on the `Quote agent` label.
+2. Have the service running (`AGENT_DB_PATH=data/video.sqlite POLL_CRON='* * * * *' npm start`). It checks every minute. To skip the wait, run `AGENT_DB_PATH=data/video.sqlite npm run process-now` in a second window.
+3. They send. Their email appears in `RFQ-Demo` in bold. If it is not bold, mark it unread.
+4. Within a minute: the dashboard shows their enquiry (with **their address as the sender**), Zoho Books has the draft, and the alert lands under `Quote agent`.
+5. Say what you did not do: nothing was typed, and nothing was sent to them.
+
+### Afterwards
+
+Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho drafts when you say so). Stop the service. Their email text and Excel are not stored on this computer, only the short log in `data/video.sqlite`.
+
+### If it goes wrong live
+- *Nothing appears after two minutes:* check the email is in `RFQ-Demo` and unread. Check `npm start` is still running.
+- *"Customer not found":* say "this is the safe behaviour: it does not guess", show the "Needs you" list, then continue with the prepared example.
+- *They attach an old `.xls` file:* the assistant asks for a readable Excel instead of guessing. Ask them to resend as `.xlsx`.
+
+---
+
+## Everything else about the live set-up
+
+`VIDEO_SCRIPT.md` has the one-time Gmail set-up (labels, filters, app password), the exact `.env` settings, and the recording guide.
+- `npm run preflight -- --send` checks the mailbox, the alert-email login and Zoho Books before you start.
 - `npm run demo:kit -- --check` makes four ready-to-send emails with Excel files and proves they behave as described.
-- The mailbox settings in `.env` (`IMAP_HOST`, `IMAP_PASSWORD`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`) are still empty, so this has not run live yet. Try it once yourself before showing a client.
+- The mailbox settings in `.env` are still empty, so none of this has run live yet. Rehearse once yourself first.

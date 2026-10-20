@@ -8,81 +8,93 @@
 
 ---
 
-## Part 1: One-time setup (about 30 minutes)
+## Part 1: One-time setup with a single Gmail address (about 40 minutes)
 
-### 1. Put the mailbox settings in `.env` (you do this; keep them out of chat and out of the video)
+This uses only **`yourname@gmail.com`**, your Zoho Books admin address. It is for the demo only. For a real client you will use a dedicated company mailbox and their team's own addresses (see the end of this part).
 
-Five settings are still empty: `IMAP_HOST`, `IMAP_PASSWORD`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`.
+### How one address plays three roles
 
-The demo mailbox `quotes@demo.example.com` is hosted on **Zoho Mail India** (its mail records say so). The usual values:
+The risk with one address is that the assistant reads **every unread email** in the folder it watches, and marks it read. So we do not let it watch your Inbox. We give it its own **Gmail label** instead, and a **"+" address** that files demo emails into that label.
 
-| Setting | Value |
+| Role in the story | What it really is |
 |---|---|
-| `IMAP_HOST` | `imappro.zoho.in` (port 993, already set) |
-| `SMTP_HOST` | `smtppro.zoho.in` (port 587, already set, `SMTP_STARTTLS=true`) |
-| `SMTP_USER` | the mailbox address |
-| `IMAP_PASSWORD`, `SMTP_PASSWORD` | the mailbox password, or an **app password** if the account uses two-step sign-in |
+| **The customer** | An email sent *from* `yourname@gmail.com` |
+| **The company's RFQ mailbox** (what the assistant reads) | The Gmail label **`RFQ-Demo`**. Mail sent to **`yourname+rfq@gmail.com`** is filed there automatically. Gmail delivers any `+word` address to the same mailbox, so this reads as a separate "quotes" address, yet your real Inbox is never touched |
+| **The team's alert inbox** | Alerts are sent from and to `yourname@gmail.com` and filed under the label **`Quote agent`**. In the video you open that label only |
 
-In Zoho Mail, IMAP access must be switched on (mail settings, IMAP access). App passwords are under Zoho Accounts, Security. If `imappro` refuses you, try `imap.zoho.in` and `smtp.zoho.in`, which personal accounts use.
+### Step 1: Set up Gmail (once, about 15 minutes)
 
-### 2. Check it works, without processing anything
+1. **Turn on 2-Step Verification** if it is not on: Google Account, Security.
+2. **Create an app password:** Google Account, Security, 2-Step Verification, App passwords. Name it "Quote assistant". Copy the 16 characters and **remove the spaces**. Gmail will not accept your normal password here. This password gives full access to the mailbox, so keep it only in `.env`.
+3. **IMAP:** Gmail, Settings (gear), See all settings, Forwarding and POP/IMAP. If there is an IMAP setting, make sure it is enabled.
+4. **Make two labels:** in Gmail's left column choose "Create new label", and create **`RFQ-Demo`** and **`Quote agent`** (exactly these names). Then Settings, Labels: for `RFQ-Demo`, make sure "Show in IMAP" is ticked.
+5. **Filter 1, for the demo emails:** Settings, Filters and Blocked Addresses, Create a new filter. In **To** type `yourname+rfq@gmail.com`. Create filter. Tick **Skip the Inbox (Archive it)**, **Apply the label: RFQ-Demo**, and **Never send it to Spam**. Create filter.
+6. **Filter 2, for the alerts:** Create a new filter. In **Subject** type `[Quote agent]`. Tick **Apply the label: Quote agent** and **Never send it to Spam**. Create filter.
+
+### Step 2: Put these settings in `.env` (you type them; never paste passwords into chat)
+
+```
+MONITORED_INBOX=yourname@gmail.com
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USER=yourname@gmail.com
+IMAP_PASSWORD=<the app password, no spaces>
+IMAP_FOLDER=RFQ-Demo
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_STARTTLS=true
+SMTP_USER=yourname@gmail.com
+SMTP_PASSWORD=<the same app password>
+SMTP_FROM=yourname@gmail.com
+NOTIFY_INTERNAL_EMAIL=yourname@gmail.com
+EXCEPTION_STAKEHOLDERS=yourname@gmail.com
+```
+
+`IMAP_FOLDER=RFQ-Demo` is what keeps the assistant out of your Inbox. Alerts only ever go to the addresses listed here, never to customers.
+
+### Step 3: Check it, without processing anything
 
 ```bash
 npm run preflight -- --send
 ```
 
-It tests the mailbox login, the alert-email login and Zoho Books, sends one test message to your internal address, and lists any **unread** emails the assistant would pick up. Keep going until every line has a ✓. The messages say in plain words what is wrong if not.
+You want ✓ on every line, including `Folder "RFQ-Demo" found`. It should also report **0 unread** in that folder. If it lists unread emails, they are in the label by mistake. A test message arrives in your Inbox (it is not filed under `Quote agent`). If a line fails, the message says why.
 
-### 3. Tidy the mailbox
-
-Mark everything in the monitored inbox as read, so the video contains only the demo emails.
-
-### 4. Use a separate inbox for the team's alerts (recommended)
-
-Right now every alert goes to the same mailbox the assistant reads. That is safe (the assistant ignores its own alerts), but for the video it is clearer if the *customer's mailbox*, the *company RFQ mailbox* and the *team's alert inbox* are three different places. Set `NOTIFY_INTERNAL_EMAIL` and `EXCEPTION_STAKEHOLDERS` in `.env` to your own address. Alerts only ever go to these internal addresses, never to customers.
-
-### 5. Pick the "customer" address
-
-Any other mailbox you can send from (for example a Gmail). Its address is what the viewer sees as the sender. The ready-made emails name the company in the signature, so the assistant finds the customer by company name.
-
-*Stronger shot (optional):* edit one sample customer in Zoho Books (for example Nellore Agro Exports) so its contact email is your "customer" address. The assistant then matches by **sender email**, its first and most reliable check, and the dashboard says so. You do this in Zoho yourself; I can also do it if you tell me the address and say go ahead.
-
-### 6. Make fresh demo emails and check them
+### Step 4: Make fresh demo emails and check them
 
 ```bash
 npm run demo:kit -- --check
 ```
 
-This writes `demo-emails/` (four folders, each with an Excel file and an `email.txt` giving the subject and body) and runs all four through the real processing code against a read-only copy of your Zoho customers and items. All four should say PASS. It creates nothing in Zoho and sends nothing.
+All four should say PASS. Make fresh files before **every** take: the same Excel sent again from the same address within 48 hours is ignored as a duplicate, on purpose.
 
-**Always make fresh files before each take.** The same Excel sent again from the same address within 48 hours is ignored as a duplicate, on purpose.
-
-### 7. Start the service on a clean database
+### Step 5: Start the service on a clean database
 
 ```bash
-AGENT_DB_PATH=data/video.sqlite npm run users -- add you@yourcompany.com "Your Name" owner
-```
-
-It prints a one-time password. Then:
-
-```bash
+AGENT_DB_PATH=data/video.sqlite npm run users -- add yourname@gmail.com "Your Name" owner
 AGENT_DB_PATH=data/video.sqlite POLL_CRON='* * * * *' npm start
 ```
 
-This checks the mailbox every minute and serves the dashboard at **http://localhost:3000** (stop `npm run demo` first if it is still running; they use the same port). Sign in once now and choose your own password, so the password-change screen is not in the video. A fresh database means the dashboard shows only your demo enquiries.
+The first command prints a one-time password. The second checks the label every minute and serves the dashboard at **http://localhost:3000** (stop `npm run demo` first if it is running). Sign in once now and choose your own password, so that screen is not in the video.
 
-To skip the wait after sending an email, in another window run `AGENT_DB_PATH=data/video.sqlite npm run process-now`.
+### Step 6: Send a demo email, the way the video will show it
 
-### 8. Do one full rehearsal
+1. In Gmail choose **Compose**. **To:** `yourname+rfq@gmail.com`. Take the **Subject** and **Body** from `demo-emails/1-draft-ready/email.txt`, and attach the Excel file from the same folder. Send.
+2. Open the **`RFQ-Demo`** label. The email should be there and in **bold** (unread). **If it is not bold, select it, open the three-dots menu and choose "Mark as unread".** The assistant only picks up unread mail.
+3. Within a minute it turns non-bold (the assistant has read it). Check the dashboard, the Zoho Books quote, and the **`Quote agent`** label for the alert.
 
-Send emails 1 to 4 (Part 3), watch each one arrive, and check Zoho Books and the alert inbox. Drafts created during rehearsal stay in Zoho Books. Look at them before deleting anything (I only delete Zoho drafts if you tell me to).
+Do all four emails once as a rehearsal. Rehearsal drafts stay in Zoho Books until you decide what to do with them. I only delete Zoho drafts if you tell me to.
+
+### Later, for a real client
+
+Nothing here carries over. The client gets a dedicated company RFQ mailbox (so `IMAP_FOLDER` goes back to `INBOX`), a sending account for alerts, and their sales team's own addresses in `NOTIFY_INTERNAL_EMAIL` and `EXCEPTION_STAKEHOLDERS`. **Delete the Gmail app password** in your Google Account once the demo is done.
 
 ---
 
 ## Part 2: Screen set-up
 
 - One browser window, full screen, **zoom 110 to 125%**, bookmarks bar hidden, notifications and Do Not Disturb on.
-- Four tabs, in this order: **(1)** the customer's webmail, **(2)** the dashboard, **(3)** Zoho Books → Sales → Quotes, **(4)** the team's alert inbox.
+- Four tabs, in this order: **(1)** Gmail, ready to compose the customer's email, **(2)** the dashboard, **(3)** Zoho Books → Sales → Quotes, **(4)** Gmail with the **`Quote agent`** label open (the team's alerts). Tabs 1 and 4 are the same Gmail account, so open the label in its own tab and keep your Inbox out of sight.
 - Never show `.env`, passwords or the terminal's settings. The terminal should be hidden or minimised.
 - Record at 1080p with the microphone on, or record silent and add the narration later.
 
