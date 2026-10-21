@@ -95,6 +95,11 @@ const EnvSchema = z
     LLM_MAX_CALLS_PER_HOUR: int(600, 1, 1_000_000),
     AI_MAX_RETRIES: int(2, 0, 5),
 
+    // New customers: keep their first email and make the quote automatically once they are added in Zoho Books
+    HOLD_NEW_CUSTOMER_DAYS: int(7, 0, 60),
+    HOLD_CHECK_MINUTES: int(2, 1, 60),
+    HOLD_MAX_EMAILS: int(50, 1, 500),
+
     // Idempotency and limits
     DEDUPE_WINDOW_HOURS: int(48, 1, 24 * 30),
     MAX_ATTEMPTS: int(5, 1, 50),
@@ -272,6 +277,8 @@ export interface Config {
     maxAttachmentBytes: number;
     maxExcelRows: number;
   };
+  /** An email from a customer not yet in Zoho Books is kept this long (days; 0 = off) and re-checked this often. */
+  hold: { days: number; checkMinutes: number; maxEmails: number };
   publicDomains: ReadonlySet<string>;
   dashboard: {
     clientName: string;
@@ -385,6 +392,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       maxAttachmentBytes: e.MAX_ATTACHMENT_MB * 1024 * 1024,
       maxExcelRows: e.MAX_EXCEL_ROWS,
     },
+    hold: { days: e.HOLD_NEW_CUSTOMER_DAYS, checkMinutes: e.HOLD_CHECK_MINUTES, maxEmails: e.HOLD_MAX_EMAILS },
     publicDomains: new Set([...DEFAULT_PUBLIC_DOMAINS, ...e.PUBLIC_EMAIL_DOMAINS.map((d) => d.toLowerCase())]),
     dashboard: {
       clientName: e.CLIENT_NAME,

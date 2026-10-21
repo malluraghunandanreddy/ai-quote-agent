@@ -278,6 +278,9 @@ export class MailNotifier implements Notifier {
           ? 'More than one Zoho Books customer matches this sender; none was chosen automatically.'
           : 'No customer matched by sender email, email domain, or company name.',
         'Customers are never created automatically.',
+        ...(this.config.hold.days > 0
+          ? [`This email is being kept for up to ${this.config.hold.days} days. As soon as this customer exists in Zoho Books, the draft quote is created automatically within a few minutes. The sender does not need to resend anything.`]
+          : []),
       ],
     });
     const sections: Section[] = [

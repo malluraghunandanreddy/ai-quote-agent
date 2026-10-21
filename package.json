@@ -9,7 +9,7 @@
     "start:prod": "node dist/index.js",
     "process-now": "ts-node -e 'import { runWorkflowOnce } from \"./src/workflow/processor\"; runWorkflowOnce();'",
     "test:mock": "ts-node test/sample-run.ts",
-    "test": "node --require ts-node/register --test test/unit.test.ts test/rbac.test.ts test/automail.test.ts test/gmail.test.ts test/onboard.test.ts",
+    "test": "node --require ts-node/register --test test/unit.test.ts test/rbac.test.ts test/automail.test.ts test/gmail.test.ts test/onboard.test.ts test/hold.test.ts",
     "typecheck": "tsc --noEmit",
     "test:emails": "ts-node test/clumsy-emails.ts",
     "seed:zoho": "ts-node test/seed-zoho.ts",

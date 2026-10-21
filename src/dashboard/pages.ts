@@ -196,10 +196,11 @@ export function statusPage(opts: { config: Config; services: ServiceRow[]; clien
 
 export function dataPage(opts: { config: Config; clientName: string; viewer: Viewer; brand?: Brand; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner'] }): string {
   const days = opts.config.retentionDays;
+  const holdDays = opts.config.hold.days;
   const body = `<h1 class="pt">Your data</h1><p class="sub ptsub">Where everything lives, who can see it, and how long it is kept.</p>
 <div class="three">
 <section class="panel"><span class="eyebrow">In your Zoho Books</span><h3>Customers, items, prices, quotes</h3><p>All the business data stays in your own Zoho Books account. The assistant only <b>creates draft quotes</b>. It never sends one to a customer and never changes a customer or an item.</p></section>
-<section class="panel"><span class="eyebrow">On this server</span><h3>A log of what happened</h3><p>For each email: who sent it, the subject, the Excel file name, the result, the quote number and total, and the steps taken. <b>No email text and no Excel files are stored.</b> Records are deleted after <b>${days} days</b>.</p></section>
+<section class="panel"><span class="eyebrow">On this server</span><h3>A log of what happened</h3><p>For each email: who sent it, the subject, the Excel file name, the result, the quote number and total, and the steps taken. ${holdDays > 0 ? `<b>No email text and no Excel files are kept, with one exception:</b> an email from a customer who is not in your Zoho Books yet is held for up to <b>${holdDays} days</b>, so its quote can be made automatically once you add them. It is deleted as soon as the quote is made.` : '<b>No email text and no Excel files are stored.</b>'} Records are deleted after <b>${days} days</b>.</p></section>
 <section class="panel"><span class="eyebrow">Sent to Claude, read once</span><h3>The text of the email</h3><p>To understand a messy email, its text (and a few top rows of an unusual spreadsheet) is sent to Anthropic's Claude to read. Our server does not keep it. How Anthropic handles it follows the terms of your Anthropic account.</p></section>
 </div>
 <div class="row r2 mt"><section class="panel"><h2>Your mailbox</h2><p class="sub p0">The original emails stay in your mailbox. The assistant marks them as read once handled and does not copy or delete them.</p></section>

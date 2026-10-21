@@ -94,7 +94,7 @@ Replace the logo path, name and colour with theirs.
 **Click:** the first item (a customer-not-found one).
 
 On the enquiry page, **point at**, in order:
-- **What to do next**: "Customer not found in Zoho. Create it, then ask the sender to resend."
+- **What to do next**: "Customer not found in Zoho. Add this customer in Zoho Books. The email is being kept, and the quote is created automatically within a few minutes."
 - **What the assistant did**, on the right: "Step by step, in order. Nothing is hidden. If a customer ever asks 'what happened to my email?', you can answer in ten seconds."
 
 **Say:** "The 'Team notes' box is for your people. I'll come back to it, because it's where the different roles matter."
@@ -161,7 +161,7 @@ On **Status** (as Karthik): **point at** Mailbox, Zoho Books, Claude, Alert emai
 
 **Click:** **Your data** in the menu.
 
-**Say:** "This answers the question every client asks: where is my data? Customers, prices and quotes stay in your own Zoho Books. On our server there is only a log of what happened, with no email text and no Excel files, deleted automatically after the number of days you choose. And the text of an email is sent to Claude to be read, and our server doesn't keep it."
+**Say:** "This answers the question every client asks: where is my data? Customers, prices and quotes stay in your own Zoho Books. On our server there is only a log of what happened, with no email text and no Excel files, deleted automatically after the number of days you choose. There is one exception: an email from a brand-new customer is kept for a few days, so the quote can be made automatically once you add them, and it is deleted as soon as that happens. And the text of an email is sent to Claude to be read, and our server doesn't keep it."
 
 ## 8. The real thing: Zoho Books (2 minutes)
 
@@ -235,7 +235,17 @@ For the demo, the easy way to a complete draft is for the client to write as one
 2. **The email names a customer that exists in your Zoho Books**, for example "Nellore Agro Exports" in the signature. Give them the ready-made email: the subject and text from `demo-emails/1-draft-ready/email.txt`. They send it from their own address. The dashboard then shows "matched by the company name in the email", which is the real behaviour for an unknown sender.
 3. **The Excel uses items that exist in your catalogue.** Send them the Excel from the same folder to attach (`npm run demo:kit` makes fresh ones). Result: a complete priced draft. If you later let them attach **their own** Excel, the assistant reads their lines, but your catalogue won't contain their items, so every line is marked "manual pricing required". That honestly shows it reading a stranger's file and never inventing a price. Do the prepared file first, theirs second, and only if you have rehearsed it.
 
-**If they write as their own company** (one that is not in your Zoho), the honest result is "Customer not found": no draft, an alert to your team, and the enquiry under "Needs you". That is worth showing too: "a new customer is not guessed; your team adds them in Zoho and the next email matches". In a real deployment most emails match by the sender's address, because the client's existing customers are already in their Zoho Books.
+### A brand-new customer: the first email becomes a quote by itself
+
+If the sender's company is not in Zoho Books yet, this is what happens, and it is worth showing:
+
+1. **The email arrives** from the new customer. The assistant reads it but finds no matching customer.
+2. **It does not lose the email.** It keeps it for a few days, and your team gets an alert: "Customer not found". On the dashboard it shows under "Needs you", with the plain instruction "Add this customer in Zoho Books. The email is being kept, and the quote is created automatically."
+3. **Your team adds the customer in Zoho Books** (this is the human step: checking who they are, credit, GST). It takes a minute.
+4. **Within about two minutes the draft quote appears by itself**, and the "Needs you" entry clears. Nobody asks the customer to resend anything, and the customer notices nothing.
+5. **From then on,** the customer is in Zoho Books, so their next emails go straight to a draft.
+
+So the first email from a new customer is not lost or delayed by a conversation: it is converted into a quote as soon as your team has approved the customer. If nobody adds the customer within the hold period (7 days by default), the kept email is deleted and the enquiry stays under "Needs you" for a person to follow up.
 
 ### Get the client set up in Zoho Books first, with their form (about 2 minutes of your time)
 
@@ -260,7 +270,7 @@ Their Excel for the live email should use the same item names or codes as their 
 
 ### A message you can send them beforehand
 
-> To set up your live demo, please fill in the attached form (your company name exactly as it appears at the bottom of your emails, and 3 to 5 items you often quote, with an approximate price) and send it back. Once it is loaded, during our call please send an email from your normal work address to **yourname+rfq@gmail.com**, with an Excel list that uses those items. You won't get a reply: the system never emails customers. We'll watch it appear on my screen. The text of the email is read by an AI service to understand it, and we keep only a short log of what happened. I'll delete the draft quote afterwards.
+> To set up your live demo, please fill in the attached form (your company name exactly as it appears at the bottom of your emails, and 3 to 5 items you often quote, with an approximate price) and send it back. Once it is loaded, during our call please send an email from your normal work address to **yourname+rfq@gmail.com**, with an Excel list that uses those items. You won't get a reply: the system never emails customers. We'll watch it appear on my screen. The text of the email is read by an AI service to understand it, and we keep only a short log of what happened (if your company is not set up yet, your email is kept for a few days so the quote can be made once it is). I'll delete the draft quote afterwards.
 
 (Tell them about the AI reading and the draft up front. It is their data and their consent.)
 
@@ -274,11 +284,11 @@ Their Excel for the live email should use the same item names or codes as their 
 
 ### Afterwards
 
-Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho drafts when you say so). Stop the service. Their email text and Excel are not stored on this computer, only a short log.
+Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho drafts when you say so). Stop the service. Their email text and Excel are not kept on this computer once the quote is made, only a short log.
 
 ### If it goes wrong live
 - *Nothing appears after two minutes:* check the email was sent to the `+rfq` address and is unread, and that `npm start` is still running.
-- *"Customer not found":* say "this is the safe behaviour: it does not guess", show the "Needs you" list, then continue with the prepared example.
+- *"Customer not found":* say "this is the safe behaviour: it does not guess", show the "Needs you" list, add the customer in Zoho Books, and watch the quote appear by itself within two minutes. That is the new-customer flow above.
 - *They attach an old `.xls` file:* the assistant asks for a readable Excel instead of guessing. Ask them to resend as `.xlsx`.
 
 ---

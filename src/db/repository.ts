@@ -27,6 +27,8 @@ export interface Enquiry {
   emailDate: string | null;
   unreadableRows: number | null;
   reviewFlags: string[];
+  /** Set while the email is being kept for a customer who is not in Zoho Books yet. */
+  holdUntil: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +40,8 @@ export interface ClaimInput {
   senderEmail: string;
   subject: string;
   attachmentName: string | null;
+  /** Process a held email again (its customer has appeared). Only affects enquiries halted on their customer. */
+  reopen?: boolean;
 }
 
 export type ClaimResult =
@@ -102,6 +106,7 @@ interface EnquiryRow {
   email_date: string | null;
   unreadable_rows: number | null;
   review_flags: string | null;
+  hold_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -133,6 +138,7 @@ function toEnquiry(r: EnquiryRow): Enquiry {
     emailDate: r.email_date,
     unreadableRows: r.unreadable_rows,
     reviewFlags: r.review_flags ? r.review_flags.split(',').filter(Boolean) : [],
+    holdUntil: r.hold_until ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -186,6 +192,11 @@ export class Repository {
           )
           .run(nowIso, enquiry.id);
         this.writeAudit(enquiry.id, 'RETRY', `attempt ${enquiry.attempts + 1}`);
+        return { outcome: 'claimed', id: enquiry.id, attempt: enquiry.attempts + 1 };
+      }
+      if (input.reopen && (enquiry.status === 'HALTED_CUSTOMER_NOT_FOUND' || enquiry.status === 'HALTED_CUSTOMER_AMBIGUOUS')) {
+        this.db.prepare("UPDATE enquiries SET status = 'PROCESSING', attempts = attempts + 1, error = NULL, updated_at = ? WHERE id = ?").run(nowIso, enquiry.id);
+        this.writeAudit(enquiry.id, 'RETRY', 'the customer is now in Zoho Books: processing the held email again');
         return { outcome: 'claimed', id: enquiry.id, attempt: enquiry.attempts + 1 };
       }
       return { outcome: 'duplicate_message', existing: enquiry };
@@ -374,6 +385,65 @@ export class Repository {
   // --- retention -----------------------------------------------------------------------------------
 
   /** Delete enquiries (and their audit trail and notification records) older than the cutoff. Never touches work in progress. */
+  // --- emails kept for a customer who is not in Zoho Books yet ---------------------------------------------------
+
+  /** Keep the raw email so the quote can be made later. Returns false (and keeps nothing) when the limit is reached. */
+  holdMail(enquiryId: number, raw: Buffer, untilIso: string, maxHeld: number): boolean {
+    const nowIso = this.now().toISOString();
+    return this.db.transaction(() => {
+      const others = (this.db.prepare('SELECT COUNT(*) AS n FROM held_mail WHERE enquiry_id <> ?').get(enquiryId) as { n: number }).n;
+      if (others >= maxHeld) return false;
+      this.db
+        .prepare('INSERT INTO held_mail (enquiry_id, raw, held_at, checked_at) VALUES (?, ?, ?, ?) ON CONFLICT (enquiry_id) DO UPDATE SET raw = excluded.raw')
+        .run(enquiryId, raw, nowIso, nowIso);
+      // A retry that halts again must not push the deadline out.
+      const had = (this.db.prepare('SELECT hold_until FROM enquiries WHERE id = ?').get(enquiryId) as { hold_until: string | null } | undefined)?.hold_until;
+      if (!had) {
+        this.db.prepare('UPDATE enquiries SET hold_until = ? WHERE id = ?').run(untilIso, enquiryId);
+        this.writeAudit(enquiryId, 'HELD', 'kept so the quote can be made automatically once the customer is added in Zoho Books');
+      }
+      return true;
+    }).immediate();
+  }
+
+  /** Held enquiries that have not been checked for `minutes`, oldest first. */
+  heldDue(minutes: number, limit: number): number[] {
+    const cutoff = new Date(this.now().getTime() - minutes * 60_000).toISOString();
+    const rows = this.db.prepare('SELECT enquiry_id FROM held_mail WHERE checked_at <= ? ORDER BY held_at, enquiry_id LIMIT ?').all(cutoff, limit) as Array<{ enquiry_id: number }>;
+    return rows.map((r) => r.enquiry_id);
+  }
+
+  heldRaw(enquiryId: number): Buffer | undefined {
+    return (this.db.prepare('SELECT raw FROM held_mail WHERE enquiry_id = ?').get(enquiryId) as { raw: Buffer } | undefined)?.raw;
+  }
+
+  heldCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM held_mail').get() as { n: number }).n;
+  }
+
+  touchHeld(enquiryId: number): void {
+    this.db.prepare('UPDATE held_mail SET checked_at = ? WHERE enquiry_id = ?').run(this.now().toISOString(), enquiryId);
+  }
+
+  /** The email is no longer needed (the quote was made): delete the copy. */
+  releaseHeld(enquiryId: number): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM held_mail WHERE enquiry_id = ?').run(enquiryId);
+      this.db.prepare('UPDATE enquiries SET hold_until = NULL WHERE id = ?').run(enquiryId);
+    })();
+  }
+
+  /** Delete held emails whose time is up. The enquiry itself stays and still needs a person. */
+  expireHeld(): number {
+    const nowIso = this.now().toISOString();
+    const due = this.db.prepare('SELECT id FROM enquiries WHERE hold_until IS NOT NULL AND hold_until <= ?').all(nowIso) as Array<{ id: number }>;
+    for (const { id } of due) {
+      this.releaseHeld(id);
+      this.writeAudit(id, 'HOLD_EXPIRED', 'the email was not kept any longer; ask the sender to resend it once the customer exists');
+    }
+    return due.length;
+  }
+
   purgeOlderThan(cutoffIso: string): number {
     const tx = this.db.transaction((cutoff: string) => {
       const removed = this.db.prepare("DELETE FROM enquiries WHERE created_at < ? AND status != 'PROCESSING'").run(cutoff).changes;

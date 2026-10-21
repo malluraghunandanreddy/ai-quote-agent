@@ -118,9 +118,13 @@ export interface DailySummary {
 export function attentionReason(e: Enquiry): string {
   switch (e.status) {
     case 'HALTED_CUSTOMER_NOT_FOUND':
-      return `Customer not found in Zoho${e.companyInEmail ? ` (company in the email: ${e.companyInEmail})` : ''}. Create it, then ask the sender to resend.`;
+      return e.holdUntil
+        ? `Customer not found in Zoho${e.companyInEmail ? ` (company in the email: ${e.companyInEmail})` : ''}. Add this customer in Zoho Books. The email is being kept, and the quote is created automatically within a few minutes of the customer being added. Nobody needs to resend it.`
+        : `Customer not found in Zoho${e.companyInEmail ? ` (company in the email: ${e.companyInEmail})` : ''}. Create it, then ask the sender to resend.`;
     case 'HALTED_CUSTOMER_AMBIGUOUS':
-      return 'More than one Zoho customer fits this sender. Make the right one unambiguous, then ask for a resend.';
+      return e.holdUntil
+        ? 'More than one Zoho customer fits this sender. Make the right one unambiguous in Zoho Books. The email is being kept, and the quote is created automatically within a few minutes. Nobody needs to resend it.'
+        : 'More than one Zoho customer fits this sender. Make the right one unambiguous, then ask for a resend.';
     case 'NEEDS_INFO':
       return 'The email or Excel could not be turned into a quote. Ask the sender for a readable Excel.';
     case 'FAILED':

@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS enquiries (
   email_date        TEXT,
   unreadable_rows   INTEGER,
   review_flags      TEXT,
+  -- set while the email is kept waiting for a new customer to be added in Zoho Books
+  hold_until        TEXT,
   created_at        TEXT    NOT NULL,
   updated_at        TEXT    NOT NULL
 );
@@ -132,3 +134,12 @@ CREATE TABLE IF NOT EXISTS enquiry_notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_enquiry_notes ON enquiry_notes (enquiry_id, id);
+
+-- An email from a customer who is not in Zoho Books yet is kept here, temporarily, so the quote can be created
+-- automatically once the customer is added. Deleted when the quote is made, when the hold runs out, or with the enquiry.
+CREATE TABLE IF NOT EXISTS held_mail (
+  enquiry_id  INTEGER PRIMARY KEY REFERENCES enquiries (id) ON DELETE CASCADE,
+  raw         BLOB    NOT NULL,
+  held_at     TEXT    NOT NULL,
+  checked_at  TEXT    NOT NULL
+);

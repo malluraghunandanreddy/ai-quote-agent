@@ -420,6 +420,8 @@ async function alertFailure(rt: Runtime, enquiry: EnquiryRef, error: string, att
 interface UnitOptions {
   /** Failures will not fix themselves (e.g. an unreadable email): alert after the first attempt. */
   permanent?: boolean;
+  /** A held email is being processed again because its customer now exists. */
+  reopen?: boolean;
 }
 
 /** Claim in the database first, then do the work. Any thrown error becomes FAILED (retried on later polls). */
@@ -433,6 +435,7 @@ async function runUnit(rt: Runtime, unit: Unit, keys: { messageKey: string; cont
     senderEmail: mail.from.address,
     subject: mail.subject,
     attachmentName,
+    ...(options.reopen ? { reopen: true } : {}),
   });
 
   const enquiryFor = (enquiryId: number): EnquiryRef => ({
@@ -486,7 +489,7 @@ async function runUnit(rt: Runtime, unit: Unit, keys: { messageKey: string; cont
 // --- one email -------------------------------------------------------------------------------------
 
 /** Process one raw RFC 822 message (every Excel attachment is its own enquiry). Never throws. */
-export async function processRawMessage(rt: Runtime, source: Buffer): Promise<MessageResult> {
+export async function processRawMessage(rt: Runtime, source: Buffer, options: { reopen?: boolean } = {}): Promise<MessageResult> {
   let mail: InboundMail;
   try {
     mail = await parseRawEmail(source, { maxAttachmentBytes: rt.config.limits.maxAttachmentBytes });
@@ -542,9 +545,55 @@ export async function processRawMessage(rt: Runtime, source: Buffer): Promise<Me
   for (const unit of units) {
     const bytes = unit.attachment?.content ?? Buffer.from(mail.latestText, 'utf8');
     const keys = computeKeys(bytes, mail.from.address, mail.messageId);
-    results.push(await runUnit(rt, unit, keys));
+    results.push(await runUnit(rt, unit, keys, options.reopen ? { reopen: true } : {}));
+  }
+
+  // A customer who is not in Zoho Books yet: keep the email, so the quote is made by itself once they are added and
+  // nobody has to ask the sender to resend. The mailbox copy is still marked read. Deleted when the quote is made,
+  // when the hold runs out, or with the enquiry.
+  const hold = rt.config.hold;
+  if (hold.days > 0) {
+    for (const r of results) {
+      if (r.outcome !== 'halted_customer' || r.enquiryId === undefined) continue;
+      const until = new Date(rt.clock().getTime() + hold.days * 86_400_000).toISOString();
+      if (rt.repo.holdMail(r.enquiryId, source, until, hold.maxEmails)) logger.info('Email kept until the customer is added', { enquiryId: r.enquiryId, days: hold.days });
+      else logger.warn('Too many held emails; this one is not kept (ask the sender to resend after adding the customer)', { enquiryId: r.enquiryId, limit: hold.maxEmails });
+    }
   }
   return { handled: results.every((r) => FINAL.has(r.outcome)), messageId: mail.messageId, results };
+}
+
+// --- emails waiting for a new customer ---------------------------------------------------------------------
+
+/**
+ * Held emails (customer not found, kept for a few days): each time through, drop the ones whose time is up, and for the
+ * rest check, cheaply, whether the customer exists in Zoho Books now. Only when it does is the whole email processed
+ * again, which creates the draft quote and sends the usual alert. The sender never has to resend anything.
+ */
+export async function retryHeldEnquiries(rt: Runtime): Promise<{ checked: number; resolved: number; expired: number }> {
+  const out = { checked: 0, resolved: 0, expired: 0 };
+  out.expired = rt.repo.expireHeld();
+  const due = rt.repo.heldDue(rt.config.hold.checkMinutes, 25);
+  // Look at Zoho's current customers (at most once a minute) so a customer added or a clash cleared is seen straight away,
+  // not after the cached list expires.
+  if (due.length > 0 && rt.customers.canRefresh()) await rt.customers.reload();
+  for (const id of due) {
+    const enquiry = rt.repo.get(id);
+    const raw = rt.repo.heldRaw(id);
+    if (!enquiry || !raw) continue;
+    rt.repo.touchHeld(id);
+    out.checked++;
+    const lookup = await resolveCustomer(rt.zoho, { senderEmail: enquiry.senderEmail, companyName: enquiry.companyInEmail }, rt.config.publicDomains, rt.customers);
+    if (lookup.resolution.status !== 'found') continue;
+    const result = (await processRawMessage(rt, raw, { reopen: true })).results.find((r) => r.enquiryId === id);
+    if (result?.outcome === 'quote_created' || result?.outcome === 'quote_created_with_exceptions') {
+      rt.repo.releaseHeld(id);
+      out.resolved++;
+      logger.info('Held email turned into a quote now that the customer exists', { enquiryId: id, outcome: result.outcome });
+    }
+  }
+  if (out.checked + out.expired > 0) logger.info('Held emails checked', out);
+  return out;
 }
 
 // --- one polling cycle -----------------------------------------------------------------------------
@@ -613,6 +662,11 @@ export async function runWorkflowCycle(rt: Runtime): Promise<CycleSummary> {
       byTask: Object.fromEntries(Object.entries(st.byTask).map(([k, v]) => [k, v.calls])),
     });
     rt.llm.resetStats();
+  }
+  try {
+    await retryHeldEnquiries(rt);
+  } catch (err) {
+    logger.error('Checking held emails failed; it will be tried again next cycle', { error: errorMessage(err) });
   }
   return summary;
 }
