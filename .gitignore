@@ -18,3 +18,8 @@ demo-emails/
 .env.bak
 client-onboarding-template.xlsx
 .DS_Store
+
+# private files copied in for checking (client documents and spreadsheets, dry-run scripts)
+data/*.xlsx
+data/*.pdf
+data/dryrun-*.ts

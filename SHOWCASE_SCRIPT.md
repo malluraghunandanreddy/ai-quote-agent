@@ -277,10 +277,10 @@ Their Excel for the live email should use the same item names or codes as their 
 
 ### On the call
 
-1. Share your screen: Gmail (your Inbox, where their email arrives), the dashboard, Zoho Books Quotes, and a second Gmail tab searching for `Quote agent` (the alerts).
+1. Share your screen: Gmail (your Inbox, where their email arrives), the dashboard, Zoho Books Quotes, and a second Gmail tab searching for `"Draft Quotation Created" OR "Additional Information Required" OR "Unmatched Products" OR "Quote agent"` (the alerts).
 2. Have the service running (`npm start`). It checks every minute.
 3. They send. Their email arrives in your Inbox, unread (bold), with **their address** as the sender.
-4. Within a minute: the dashboard shows their enquiry (sender: their address; customer: matched by company name), Zoho Books has the draft, and the alert email arrives in your Gmail (search `Quote agent`).
+4. Within a minute: the dashboard shows their enquiry (sender: their address; customer: matched by company name), Zoho Books has the draft, and the alert email arrives in your Gmail (search `"Draft Quotation Created" OR "Additional Information Required" OR "Unmatched Products" OR "Quote agent"`).
 5. Say what you did not do: nothing was typed, and nothing was sent to them.
 
 ### Afterwards

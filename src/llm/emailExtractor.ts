@@ -101,7 +101,11 @@ export async function extractEmailMetadata(llm: LlmClient, mail: InboundMail): P
     return {
       companyName: clean(out.company_name, LIMITS.company) ?? heuristic.companyName,
       contactName: clean(out.contact_name, LIMITS.contact) ?? heuristic.contactName,
-      deliveryAddress: clean(out.delivery_address, LIMITS.address),
+      // The address now goes into the quote notes too, so it gets the same protection as the free-text notes.
+      deliveryAddress: heuristic.flags.length > 0 ? null : (() => {
+        const address = clean(out.delivery_address, LIMITS.address);
+        return address && NOTE_ABOUT_INSTRUCTIONS.test(address) ? null : address;
+      })(),
       deliveryTimeline: clean(out.delivery_timeline, LIMITS.timeline) ?? heuristic.deliveryTimeline,
       specialNotes: notes && NOTE_ABOUT_INSTRUCTIONS.test(notes) ? null : notes,
       flags: heuristic.flags,

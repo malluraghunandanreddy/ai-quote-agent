@@ -36,6 +36,20 @@ export interface UnmatchedLineInfo {
   reason: string;
 }
 
+/**
+ * The subjects the client's requirements document asks for on alerts A, B and C. For A and B the customer (or sender) is added
+ * after them so several alerts can be told apart in an inbox; C ends with the customer name, as the document shows.
+ */
+export const ALERT_SUBJECT = {
+  additionalInfo: 'Additional Information Required – Customer Quotation',
+  unmatched: 'New/Unmatched Products Identified – Quote Enquiry',
+  draft: 'Draft Quotation Created',
+} as const;
+
+/** Is this subject one of this assistant's own alerts (also when a reply or forward has put "Re:" in front)? */
+export const isOwnAlertSubject = (subject: string): boolean =>
+  /^\s*((re|fwd?|aw):\s*)*(\[quote agent\]|additional information required [–-] customer quotation|new\/unmatched products identified [–-] quote enquiry|draft quotation created [–-])/i.test(subject);
+
 export interface SendResult {
   delivered: boolean;
   dryRun: boolean;
@@ -144,6 +158,9 @@ function money(amount: number, currency: string): string {
   }
 }
 
+/** The customer in a few words for a subject line: the company named in the email, else the sender. */
+const whoFor = (e: EnquiryRef): string => oneLine(e.meta?.companyName || e.senderName || e.senderEmail, 80);
+
 function enquirySection(e: EnquiryRef): Section {
   const rows: Array<[string, string]> = [
     ['From', e.senderName ? `${oneLine(e.senderName, 80)} <${e.senderEmail}>` : e.senderEmail],
@@ -193,7 +210,7 @@ export class MailNotifier implements Notifier {
       });
     }
     return this.deliver({
-      subject: `[Quote agent] More information needed: ${oneLine(ctx.enquiry.subject, 120) || ctx.enquiry.senderEmail}`,
+      subject: `${ALERT_SUBJECT.additionalInfo} – ${whoFor(ctx.enquiry)}`,
       to: [this.config.notify.internal],
       intro,
       sections,
@@ -212,7 +229,7 @@ export class MailNotifier implements Notifier {
       ],
     });
     return this.deliver({
-      subject: `[Quote agent] ${ctx.unmatched.length} item(s) need manual pricing: draft ${ctx.quote.estimateNumber}`,
+      subject: `${ALERT_SUBJECT.unmatched} – ${whoFor(ctx.enquiry)}`,
       to: this.config.notify.stakeholders,
       intro,
       sections: [
@@ -258,7 +275,7 @@ export class MailNotifier implements Notifier {
     if (ctx.warnings.length > 0) sections.push({ heading: 'Please check', bullets: ctx.warnings });
 
     return this.deliver({
-      subject: `[Quote agent] Draft quotation ${quote.estimateNumber} created for ${oneLine(ctx.customerName, 80)}`,
+      subject: `${ALERT_SUBJECT.draft} – ${oneLine(ctx.customerName, 80)}`,
       to: [this.config.notify.internal],
       intro: `A draft quotation was created in Zoho Books for the enquiry below.`,
       sections,

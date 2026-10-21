@@ -61,7 +61,7 @@ Purchase Dept
 Nellore Agro Exports
 Godown 3, Port Road, Nellore`,
     expect: { outcome: 'quote_created', notices: ['C_DRAFT_CREATED'] },
-    result: 'Matched to the customer "Nellore Agro Exports" by the company name in the email. Draft quote with all 3 lines priced. One alert email to your team: "Draft created". Dashboard: Draft ready.',
+    result: 'Matched to the customer "Nellore Agro Exports" by the company name in the email. Draft quote with all 3 lines priced. One alert email to your team: "Draft Quotation Created". Dashboard: Draft ready.',
     excel: {
       file: 'RFQ_Nellore_Agro_Nov.xlsx',
       rows: (ref) => [
@@ -87,7 +87,7 @@ PURCHASE DEPT
 KAKINADA MARINE SUPPLIES
 FISHING HARBOUR RD, KAKINADA`,
     expect: { outcome: 'quote_created_with_exceptions', notices: ['B_UNMATCHED_PRODUCTS', 'C_DRAFT_CREATED'] },
-    result: 'Matched to "Kakinada Marine Supplies". Draft quote created; two lines priced, the bolt line marked "manual pricing required". Two alert emails to your team: "Draft created" and "Items need pricing". Dashboard: Draft, items to price.',
+    result: 'Matched to "Kakinada Marine Supplies". Draft quote created; two lines priced, the bolt line marked "manual pricing required". Two alert emails: "Draft Quotation Created" to your team and "New/Unmatched Products Identified" to the stakeholders. Dashboard: Draft, items to price.',
     excel: {
       file: 'RFQ_Kakinada_Marine.xlsx',
       rows: (ref) => [
@@ -132,7 +132,7 @@ Autonagar, Vijayawada`,
     subject: 'quote',
     body: 'bhai quote bhej do attached ka. urgent',
     expect: { outcome: 'needs_info', notices: ['A_ADDITIONAL_INFO'] },
-    result: 'Nothing to read, so no draft. One alert email to your team: "More information needed". Dashboard: Needs information.',
+    result: 'Nothing to read, so no draft. One alert email to your team: "Additional Information Required". Dashboard: Needs information.',
   },
 ];
 

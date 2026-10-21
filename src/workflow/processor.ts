@@ -4,6 +4,7 @@ import { Repository } from '../db/repository';
 import { ImapMailbox } from '../email/imapClient';
 import { computeKeys, parseRawEmail, sha256Hex } from '../email/mailParser';
 import {
+  isOwnAlertSubject,
   MailNotifier,
   type EnquiryRef,
   type Notifier,
@@ -266,6 +267,7 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
   const reference = `AIQ-${referenceSeed.slice(0, 16)}`;
   const meta = enquiry.meta;
   const notes = [
+    meta.deliveryAddress ? `Ship to: ${meta.deliveryAddress}` : '',
     meta.deliveryTimeline ? `Delivery: ${meta.deliveryTimeline}` : '',
     meta.specialNotes ? `Notes: ${meta.specialNotes}` : '',
   ]
@@ -533,7 +535,7 @@ export async function processRawMessage(rt: Runtime, source: Buffer, options: { 
   // as a new enquiry, trigger another alert, and so on every poll.
   const own = (rt.config.notify.from.match(/<([^>]+)>/)?.[1] ?? rt.config.notify.from).trim().toLowerCase();
   // Second line of defence if a mail server strips the markers: our own address, nothing attached, and one of our alert subjects.
-  const ownAlert = mail.excelAttachments.length === 0 && mail.from.address === own && /^\s*((re|fwd?|aw):\s*)*\[quote agent\]/i.test(mail.subject);
+  const ownAlert = mail.excelAttachments.length === 0 && mail.from.address === own && isOwnAlertSubject(mail.subject);
   const automatic = mail.automatic ?? (ownAlert ? "an alert sent from this assistant's own address" : null);
   if (automatic) {
     logger.info('Skipped an automatic email (it is flagged as read and not treated as an enquiry)', { from: mail.from.address, subject: mail.subject.slice(0, 80), reason: automatic });

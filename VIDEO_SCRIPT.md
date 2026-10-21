@@ -48,7 +48,7 @@ You should see four PASS lines. It creates the folder `demo-emails/` with four r
 
 ### Step 5: Send one and watch
 
-In Gmail choose Compose. **To:** `yourname+rfq@gmail.com`. Take the subject and body from `demo-emails/1-draft-ready/email.txt` and attach the Excel file from the same folder. Send. Within a minute: the dashboard shows the new enquiry, Zoho Books (Sales, Quotes) has a new draft, and your Gmail has an alert email (search for `Quote agent`).
+In Gmail choose Compose. **To:** `yourname+rfq@gmail.com`. Take the subject and body from `demo-emails/1-draft-ready/email.txt` and attach the Excel file from the same folder. Send. Within a minute: the dashboard shows the new enquiry, Zoho Books (Sales, Quotes) has a new draft, and your Gmail has an alert email (search for `"Draft Quotation Created" OR "Additional Information Required" OR "Unmatched Products" OR "Quote agent"`).
 
 If nothing happens after two minutes, open the email in Gmail and choose the three-dots menu, then "Mark as unread". The assistant only picks up unread mail, and Gmail sometimes shows a message you sent to yourself as already read. Mail that other people send you arrives unread as normal, so this only matters when you test from your own address.
 
@@ -63,7 +63,7 @@ Nothing here carries over. The client gets a dedicated company quotes mailbox, a
 ## Part 2: Screen set-up
 
 - One browser window, full screen, **zoom 110 to 125%**, bookmarks bar hidden, notifications and Do Not Disturb on.
-- Four tabs, in this order: **(1)** Gmail, ready to compose the customer's email, **(2)** the dashboard, **(3)** Zoho Books → Sales → Quotes, **(4)** a second Gmail tab searching for `Quote agent` (the team's alerts). Tabs 1 and 4 are the same Gmail account, so keep your Inbox out of sight.
+- Four tabs, in this order: **(1)** Gmail, ready to compose the customer's email, **(2)** the dashboard, **(3)** Zoho Books → Sales → Quotes, **(4)** a second Gmail tab searching for `"Draft Quotation Created" OR "Additional Information Required" OR "Unmatched Products" OR "Quote agent"` (the team's alerts). Tabs 1 and 4 are the same Gmail account, so keep your Inbox out of sight.
 - Never show `.env`, passwords or the terminal's settings. The terminal should be hidden or minimised.
 - Record at 1080p with the microphone on, or record silent and add the narration later.
 

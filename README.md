@@ -58,8 +58,10 @@ on a volume.
 | A · Additional Information Required – Customer Quotation | Sales | Mandatory fields missing, invalid quantities, unreadable attachment |
 | B · New/Unmatched Products Identified – Quote Enquiry | Stakeholders A, B, C | Product not in the master, no price, or uncertain match |
 | C · Draft Quotation Created – *Customer* | Sales | Every draft (quote number, customer, items, total, status, link) |
-| Customer Review Required – Quote Enquiry | Sales | Sender doesn't match any customer |
-| Quote Agent Processing Failure – *code* | Stakeholders | Permanent ERP error, or temporary error after all retries |
+| [Quote agent] Customer not found (or Ambiguous customer) | Sales | Sender doesn't match any customer (or matches several). The email is kept and the quote follows once the customer is added |
+| [Quote agent] Processing failed | Sales | Permanent ERP error, or temporary error after all retries |
+
+For A and B the customer (or the sender, if no company was named) is added after the subject, so several alerts can be told apart in an inbox; C ends with the customer name. The quote's notes carry the ship-to address, delivery time and special notes from the email (marked "verify before sending"); free text from an email that talks to an AI is left out.
 
 The agent recognises its own emails and skips them, so the inbox and Sales can be the same mailbox.
 
