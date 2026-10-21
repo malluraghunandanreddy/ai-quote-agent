@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { ConfigError, getConfig, type Config } from '../config';
+import { findUnreadUids, type MailboxQuery } from '../email/imapClient';
 import { errorMessage } from '../logger';
 import { createRuntime } from '../workflow/processor';
 
@@ -65,12 +66,13 @@ async function checkImap(config: Config): Promise<{ failed: boolean; lines: Line
     }
     const lock = await client.getMailboxLock(imap.folder);
     try {
-      const unread = ((await client.search({ seen: false }, { uid: true })) || []).sort((a, b) => a - b);
+      const { uids: unread, ignored } = await findUnreadUids(client as unknown as MailboxQuery, imap.onlyTo);
       lines.push({ ok: true, text: `Folder "${imap.folder}" found` });
+      if (imap.onlyTo) lines.push({ ok: null, text: `Only mail sent to ${imap.onlyTo} is processed; ${ignored} other unread email${ignored === 1 ? '' : 's'} (last 14 days) will be left alone` });
       if (unread.length === 0) {
-        lines.push({ ok: null, text: 'No unread emails. Anything you send now will be the only thing the assistant processes.' });
+        lines.push({ ok: null, text: `No unread emails${imap.onlyTo ? ` sent to ${imap.onlyTo}` : ''}. Anything you send now will be the only thing the assistant processes.` });
       } else {
-        lines.push({ ok: null, text: `${unread.length} unread email${unread.length === 1 ? '' : 's'} would be processed on the next check${unread.length > 5 ? '. If you do not want that for the demo, mark them as read first' : ''}. The newest:` });
+        lines.push({ ok: null, text: `${unread.length} unread email${unread.length === 1 ? '' : 's'} would be processed on the next check. The newest:` });
         for await (const m of client.fetch(unread.slice(-5).join(','), { envelope: true }, { uid: true })) {
           const from = m.envelope?.from?.[0];
           lines.push({ ok: null, text: `    ${from?.address ?? '?'}  "${(m.envelope?.subject ?? '').slice(0, 60)}"` });
@@ -134,9 +136,12 @@ async function checkZoho(config: Config): Promise<{ failed: boolean; lines: Line
     await rt.catalog.ensureLoaded();
     const lines: Line[] = [
       { ok: true, text: `Connected to Zoho Books (organization ${config.zoho.organizationId}, books.zoho.${config.zoho.dc})` },
-      { ok: customers.length > 0, text: `${customers.length} active customers and ${rt.catalog.size} items are visible to the assistant` },
+      { ok: true, text: `${customers.length} active customers and ${rt.catalog.size} items are visible to the assistant` },
     ];
-    return { failed: customers.length === 0, lines };
+    // An empty Zoho is not an error, but it changes what the demo shows, so say so.
+    if (customers.length === 0) lines.push({ ok: null, text: 'No customers yet, so every email will show "customer not found" until the sender\'s company is added in Zoho Books.' });
+    if (rt.catalog.size === 0) lines.push({ ok: null, text: 'No items yet, so every line on a draft will be marked "manual pricing required" until items are added.' });
+    return { failed: false, lines };
   } catch (err) {
     const why = errorMessage(err);
     const hint = /token refresh/i.test(why) ? ' The Zoho keys were refused. Check ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET and ZOHO_REFRESH_TOKEN, and that ZOHO_DC matches where the Zoho account lives (in = India).' : '';

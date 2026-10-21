@@ -15,3 +15,6 @@ test/.cache/
 data/backups/
 dist-image/
 demo-emails/
+.env.bak
+client-onboarding-template.xlsx
+.DS_Store

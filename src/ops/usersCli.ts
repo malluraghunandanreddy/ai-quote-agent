@@ -1,9 +1,9 @@
-import readline from 'node:readline';
 import { generatePassword, hashPassword, looksLikeEmail, passwordProblem } from '../auth/passwords';
 import { ROLES, isRole, roleLabel } from '../auth/rbac';
 import { getConfig } from '../config';
 import { openDatabase } from '../db';
 import { UserError, UserStore } from '../db/users';
+import { askHidden } from './prompt';
 
 /**
  * Manage dashboard logins from the server's command line. This is the way in when nobody can sign in (a forgotten
@@ -27,21 +27,6 @@ const USAGE = `Usage:
   npm run users -- off <email>
   npm run users -- on <email>
   npm run users -- unlock <email>`;
-
-function askHidden(prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const write = (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput.bind(rl);
-    (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = (s: string) => {
-      if (s.includes(prompt)) write(s);
-    };
-    rl.question(prompt, (answer) => {
-      rl.close();
-      process.stdout.write('\n');
-      resolve(answer);
-    });
-  });
-}
 
 async function main(): Promise<number> {
   const [cmd, ...args] = process.argv.slice(2);

@@ -198,13 +198,13 @@ async function main(): Promise<void> {
     if (s.excel) fs.writeFileSync(path.join(dir, s.excel.file), await workbook(s.excel.rows(`${s.dir.slice(0, 1)}/2026/${take}`)));
     fs.writeFileSync(
       path.join(dir, 'email.txt'),
-      `${s.title}\n${'='.repeat(s.title.length)}\n\nSEND TO:   the monitored mailbox (IMAP_USER in .env)\nSEND FROM: a different address, playing the customer\nSUBJECT:   ${s.subject}\nATTACH:    ${s.excel ? s.excel.file : '(nothing: send it without an attachment)'}\n\nBODY:\n${s.body}\n\nWHAT HAPPENS:\n${s.result}\n`,
+      `${s.title}\n${'='.repeat(s.title.length)}\n\nSEND TO:   the address the assistant reads (IMAP_ONLY_TO in .env, for example yourname+rfq@gmail.com)\nSEND FROM: the "customer" (your own Gmail is fine for a rehearsal)\nSUBJECT:   ${s.subject}\nATTACH:    ${s.excel ? s.excel.file : '(nothing: send it without an attachment)'}\n\nBODY:\n${s.body}\n\nWHAT HAPPENS:\n${s.result}\n`,
     );
     index.push(`${s.dir}: ${s.title}`);
   }
   fs.writeFileSync(
     path.join(OUT, 'README.txt'),
-    `Demo emails (take ${take})\n\nSend them one at a time, from an address that is NOT the monitored mailbox, to the monitored mailbox.\nThen run:  npm run process-now   (or wait up to 2 minutes if the service is running).\n\n${index.join('\n')}\n\nRe-sending the same file from the same address within 48 hours is ignored as a duplicate (on purpose).\nRun  npm run demo:kit  again for fresh files before every take.\n`,
+    `Demo emails (take ${take})\n\nSend them one at a time to the address the assistant reads (IMAP_ONLY_TO in .env).\nThen run:  npm run process-now   (or wait up to 2 minutes if the service is running).\n\n${index.join('\n')}\n\nRe-sending the same file from the same address within 48 hours is ignored as a duplicate (on purpose).\nRun  npm run demo:kit  again for fresh files before every take.\n`,
   );
   console.log(`Wrote ${SCENARIOS.length} scenarios to ${OUT} (take ${take}).`);
   if (process.argv.includes('--check')) process.exitCode = await check();

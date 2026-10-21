@@ -51,6 +51,8 @@ const EnvSchema = z
     IMAP_PASSWORD: str(),
     IMAP_FOLDER: strDefault('INBOX'),
     IMAP_PROCESSED_FOLDER: str(),
+    // Optional: only act on unread mail addressed to this address (e.g. quotes+rfq@gmail.com). Other mail is left untouched.
+    IMAP_ONLY_TO: str(),
     IMAP_BATCH_LIMIT: int(25, 1, 500),
     POLL_CRON: strDefault('*/2 * * * *'),
     RUN_ON_START: bool(true),
@@ -160,6 +162,7 @@ const EnvSchema = z
       ['SALES_TEAM_EMAIL', env.SALES_TEAM_EMAIL ? [env.SALES_TEAM_EMAIL] : []],
       ['NOTIFY_INTERNAL_EMAIL', env.NOTIFY_INTERNAL_EMAIL ? [env.NOTIFY_INTERNAL_EMAIL] : []],
       ['SMTP_FROM', env.SMTP_FROM ? [env.SMTP_FROM] : []],
+      ['IMAP_ONLY_TO', env.IMAP_ONLY_TO ? [env.IMAP_ONLY_TO] : []],
       ['EXCEPTION_STAKEHOLDERS', env.EXCEPTION_STAKEHOLDERS],
     ];
     for (const [name, list] of emails) {
@@ -204,6 +207,8 @@ export interface ImapConfig {
   password: string;
   folder: string;
   processedFolder: string | undefined;
+  /** When set, only unread mail addressed (To or Cc) to exactly this address is processed; everything else stays untouched. */
+  onlyTo: string | undefined;
 }
 
 export interface SmtpConfig {
@@ -342,6 +347,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
           password: e.IMAP_PASSWORD ?? '',
           folder: e.IMAP_FOLDER,
           processedFolder: e.IMAP_PROCESSED_FOLDER,
+          onlyTo: e.IMAP_ONLY_TO?.toLowerCase(),
         }
       : null,
     imapBatchLimit: e.IMAP_BATCH_LIMIT,

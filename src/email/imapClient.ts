@@ -2,6 +2,49 @@ import { ImapFlow } from 'imapflow';
 import type { ImapConfig } from '../config';
 import { logger, errorMessage } from '../logger';
 
+interface EnvelopeAddress {
+  address?: string | undefined;
+}
+export interface EnvelopeLike {
+  to?: EnvelopeAddress[] | undefined;
+  cc?: EnvelopeAddress[] | undefined;
+}
+
+/** Was this message addressed (To or Cc) to exactly this address? Case-insensitive, so `Quotes+RFQ@x.com` matches. */
+export function isAddressedTo(envelope: EnvelopeLike | undefined, address: string): boolean {
+  const wanted = address.trim().toLowerCase();
+  return [...(envelope?.to ?? []), ...(envelope?.cc ?? [])].some((a) => a.address?.trim().toLowerCase() === wanted);
+}
+
+/** The slice of an IMAP connection that choosing messages needs (so it can be tested without a server). */
+export interface MailboxQuery {
+  search(query: Record<string, unknown>, options: Record<string, unknown>): Promise<number[] | false>;
+  fetch(range: string, query: Record<string, unknown>, options: Record<string, unknown>): AsyncIterable<{ uid: number; envelope?: EnvelopeLike }>;
+}
+
+/** Look back this far when only mail to one address is wanted (keeps the check cheap in a busy personal inbox). */
+const ONLY_TO_LOOKBACK_DAYS = 14;
+
+/**
+ * Which unread messages should be processed, oldest first. Normally every unread message. With `onlyTo`, only those
+ * addressed to that exact address: the others are never opened, flagged or moved, and are reported as `ignored`.
+ * Only sender, recipients and subject of the other unread messages are looked at, never their text.
+ */
+export async function findUnreadUids(client: MailboxQuery, onlyTo?: string, now: Date = new Date()): Promise<{ uids: number[]; ignored: number }> {
+  const query: Record<string, unknown> = onlyTo ? { seen: false, since: new Date(now.getTime() - ONLY_TO_LOOKBACK_DAYS * 86_400_000) } : { seen: false };
+  const found = ((await client.search(query, { uid: true })) || []).sort((a, b) => a - b);
+  if (!onlyTo) return { uids: found, ignored: 0 };
+  const keep: number[] = [];
+  for (let i = 0; i < found.length; i += 200) {
+    const chunk = found.slice(i, i + 200);
+    for await (const m of client.fetch(chunk.join(','), { envelope: true, uid: true }, { uid: true })) {
+      if (isAddressedTo(m.envelope, onlyTo)) keep.push(m.uid);
+    }
+  }
+  keep.sort((a, b) => a - b);
+  return { uids: keep, ignored: found.length - keep.length };
+}
+
 export interface FetchedMessage {
   uid: number;
   source: Buffer;
@@ -60,8 +103,8 @@ export class ImapMailbox {
       try {
         const mailbox = client.mailbox;
         const uidValidity = mailbox && typeof mailbox !== 'boolean' ? mailbox.uidValidity : 0n;
-        const found = await client.search({ seen: false }, { uid: true });
-        const uids = (found || []).sort((a, b) => a - b).slice(0, this.batchLimit);
+        const { uids: unread } = await findUnreadUids(client as unknown as MailboxQuery, this.cfg.onlyTo);
+        const uids = unread.slice(0, this.batchLimit);
 
         const messages: FetchedMessage[] = [];
         for (const uid of uids) {

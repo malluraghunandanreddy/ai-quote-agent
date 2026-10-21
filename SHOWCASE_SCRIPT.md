@@ -227,34 +227,57 @@ On **Status** (as Karthik): **point at** Mailbox, Zoho Books, Claude, Alert emai
 
 ## Live, with the client sending their own email
 
-You can ask the client to send an email from **their own address** during the call, and watch it turn into a draft on your screen. The sender's real mail ID shows up in the dashboard. Three things must be true beforehand, or the result will be less impressive:
+The client can send from **any address**. You do not need to know it beforehand, and you do not need to create them in Zoho. That is also how real life works: a customer's address is never known in advance, so the assistant finds the customer in three steps. First by the sender's exact email address, then by their company's email domain, then by the **company name written in the email**, usually the signature. (Free-mail domains such as gmail.com are never used for the domain step.)
 
-1. **They send to the right address:** `yourname+rfq@gmail.com` (not `yourname@gmail.com`). The "+rfq" part makes Gmail file it under the `RFQ-Demo` label, which is the only place the assistant reads. If they send to the plain address instead, it lands in your Inbox and the assistant never sees it. Fix on the spot: open it in Gmail, apply the label `RFQ-Demo`, and mark it unread. A few corporate mail systems reject a "+" in an address; if theirs does, use that same fix, or add a Gmail filter beforehand for `from:@theirdomain.com` that applies `RFQ-Demo`.
-2. **They exist as a customer in your Zoho Books.** Otherwise the honest result is "Customer not found" (no draft, an alert to your team). That is still a good thing to show, but it is not the draft you want to lead with. Before the call, ask for their company name and the address they will send from, and create a customer for them in Zoho Books (name, for example "Their Company (DEMO)", with that email as the contact email). The assistant then matches by sender email. I can create it for you if you tell me the details and say go ahead.
-3. **The items in their Excel exist in your catalogue.** Send them one of the ready-made Excel files beforehand (`npm run demo:kit` makes fresh ones; the item codes in them exist in your Zoho). Result: a complete priced draft. If you then let them send **their own** Excel, the assistant reads their lines, but your catalogue won't contain their items, so every line is marked "manual pricing required". That honestly shows how it reads a stranger's file and never invents a price. Do the prepared file first, their own file second, and only if you have rehearsed it.
+For the demo, the easy way to a complete draft is for the client to write as one of your sample customers:
+
+1. **They send to `yourname+rfq@gmail.com`** (not `yourname@gmail.com`). The assistant only acts on mail addressed to the `+rfq` address; mail to the plain address is left alone. A few corporate mail systems reject a "+" in an address; if theirs does, ask them to send from a personal address.
+2. **The email names a customer that exists in your Zoho Books**, for example "Nellore Agro Exports" in the signature. Give them the ready-made email: the subject and text from `demo-emails/1-draft-ready/email.txt`. They send it from their own address. The dashboard then shows "matched by the company name in the email", which is the real behaviour for an unknown sender.
+3. **The Excel uses items that exist in your catalogue.** Send them the Excel from the same folder to attach (`npm run demo:kit` makes fresh ones). Result: a complete priced draft. If you later let them attach **their own** Excel, the assistant reads their lines, but your catalogue won't contain their items, so every line is marked "manual pricing required". That honestly shows it reading a stranger's file and never inventing a price. Do the prepared file first, theirs second, and only if you have rehearsed it.
+
+**If they write as their own company** (one that is not in your Zoho), the honest result is "Customer not found": no draft, an alert to your team, and the enquiry under "Needs you". That is worth showing too: "a new customer is not guessed; your team adds them in Zoho and the next email matches". In a real deployment most emails match by the sender's address, because the client's existing customers are already in their Zoho Books.
+
+### Get the client set up in Zoho Books first, with their form (about 2 minutes of your time)
+
+For a complete, priced draft on their very first email, their company and a few of their items must already be in your Zoho Books. You do not type them in by hand: the client fills in a small Excel form and one command adds everything.
+
+1. **Make the form** and send it to the client with the message below:
+   ```bash
+   npm run onboard:template
+   ```
+   This writes `client-onboarding-template.xlsx` in the project folder.
+2. **When they send it back, preview it.** Save their file in the project folder and run (it only reads, it changes nothing, and it says in plain words if something in the file needs fixing):
+   ```bash
+   npm run onboard -- their-file.xlsx
+   ```
+3. **Create everything in Zoho Books:**
+   ```bash
+   npm run onboard -- their-file.xlsx --create
+   ```
+4. **Restart the assistant** (Ctrl+C, then `npm start`) so it picks up the new items straight away.
+
+Their Excel for the live email should use the same item names or codes as their form. Items already in Zoho are skipped, so running it twice is safe. The quote assistant itself never creates customers or items from emails, on purpose: a spam or fake email could otherwise fill your Zoho Books with junk. This is a deliberate step that you run.
 
 ### A message you can send them beforehand
 
-> Subject: Quick live test during our call
->
-> During our call, please send an email from your normal work address to **yourname+rfq@gmail.com**. Write it like a normal quote request, with your company name in the signature, and attach the Excel (.xlsx) list I'm sending you. You won't get a reply: the system never emails customers. We'll watch it appear on my screen. The text of the email is read by an AI service to understand it, and we keep only a short log of what happened. I'll delete the draft quote afterwards.
+> To set up your live demo, please fill in the attached form (your company name exactly as it appears at the bottom of your emails, and 3 to 5 items you often quote, with an approximate price) and send it back. Once it is loaded, during our call please send an email from your normal work address to **yourname+rfq@gmail.com**, with an Excel list that uses those items. You won't get a reply: the system never emails customers. We'll watch it appear on my screen. The text of the email is read by an AI service to understand it, and we keep only a short log of what happened. I'll delete the draft quote afterwards.
 
 (Tell them about the AI reading and the draft up front. It is their data and their consent.)
 
 ### On the call
 
-1. Share your screen: Gmail on the `RFQ-Demo` label, the dashboard, Zoho Books Quotes, and Gmail on the `Quote agent` label.
-2. Have the service running (`AGENT_DB_PATH=data/video.sqlite POLL_CRON='* * * * *' npm start`). It checks every minute. To skip the wait, run `AGENT_DB_PATH=data/video.sqlite npm run process-now` in a second window.
-3. They send. Their email appears in `RFQ-Demo` in bold. If it is not bold, mark it unread.
-4. Within a minute: the dashboard shows their enquiry (with **their address as the sender**), Zoho Books has the draft, and the alert lands under `Quote agent`.
+1. Share your screen: Gmail (your Inbox, where their email arrives), the dashboard, Zoho Books Quotes, and a second Gmail tab searching for `Quote agent` (the alerts).
+2. Have the service running (`npm start`). It checks every minute.
+3. They send. Their email arrives in your Inbox, unread (bold), with **their address** as the sender.
+4. Within a minute: the dashboard shows their enquiry (sender: their address; customer: matched by company name), Zoho Books has the draft, and the alert email arrives in your Gmail (search `Quote agent`).
 5. Say what you did not do: nothing was typed, and nothing was sent to them.
 
 ### Afterwards
 
-Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho drafts when you say so). Stop the service. Their email text and Excel are not stored on this computer, only the short log in `data/video.sqlite`.
+Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho drafts when you say so). Stop the service. Their email text and Excel are not stored on this computer, only a short log.
 
 ### If it goes wrong live
-- *Nothing appears after two minutes:* check the email is in `RFQ-Demo` and unread. Check `npm start` is still running.
+- *Nothing appears after two minutes:* check the email was sent to the `+rfq` address and is unread, and that `npm start` is still running.
 - *"Customer not found":* say "this is the safe behaviour: it does not guess", show the "Needs you" list, then continue with the prepared example.
 - *They attach an old `.xls` file:* the assistant asks for a readable Excel instead of guessing. Ask them to resend as `.xlsx`.
 
@@ -262,7 +285,7 @@ Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho dra
 
 ## Everything else about the live set-up
 
-`VIDEO_SCRIPT.md` has the one-time Gmail set-up (labels, filters, app password), the exact `.env` settings, and the recording guide.
-- `npm run preflight -- --send` checks the mailbox, the alert-email login and Zoho Books before you start.
+`VIDEO_SCRIPT.md` has the short set-up (one app password, one command) and the recording guide.
+- `npm run setup:gmail -- yourname@gmail.com` writes the settings and tests the connection. `npm run preflight -- --send` re-checks the mailbox, the alert-email login and Zoho Books before you start.
 - `npm run demo:kit -- --check` makes four ready-to-send emails with Excel files and proves they behave as described.
 - The mailbox settings in `.env` are still empty, so none of this has run live yet. Rehearse once yourself first.

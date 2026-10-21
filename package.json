@@ -9,7 +9,7 @@
     "start:prod": "node dist/index.js",
     "process-now": "ts-node -e 'import { runWorkflowOnce } from \"./src/workflow/processor\"; runWorkflowOnce();'",
     "test:mock": "ts-node test/sample-run.ts",
-    "test": "node --require ts-node/register --test test/unit.test.ts test/rbac.test.ts test/automail.test.ts",
+    "test": "node --require ts-node/register --test test/unit.test.ts test/rbac.test.ts test/automail.test.ts test/gmail.test.ts test/onboard.test.ts",
     "typecheck": "tsc --noEmit",
     "test:emails": "ts-node test/clumsy-emails.ts",
     "seed:zoho": "ts-node test/seed-zoho.ts",
@@ -21,7 +21,10 @@
     "demo": "ts-node src/dashboard/demo.ts",
     "demo:seed": "ts-node src/dashboard/demo.ts --seed-only",
     "preflight": "ts-node src/ops/preflight.ts",
-    "demo:kit": "ts-node test/demo-kit.ts"
+    "demo:kit": "ts-node test/demo-kit.ts",
+    "setup:gmail": "ts-node src/ops/setupGmail.ts",
+    "onboard": "ts-node src/ops/onboard.ts",
+    "onboard:template": "ts-node src/ops/onboard.ts --template"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
