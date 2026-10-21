@@ -24,6 +24,7 @@ const ADDED_COLUMNS: Array<[table: string, column: string, type: string]> = [
   ['enquiries', 'unreadable_rows', 'INTEGER'],
   ['enquiries', 'review_flags', 'TEXT'],
   ['enquiries', 'hold_until', 'TEXT'],
+  ['enquiries', 'customer_draft', 'TEXT'],
 ];
 
 function migrate(db: Db): void {

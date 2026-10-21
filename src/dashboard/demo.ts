@@ -6,6 +6,7 @@ import { loadConfig, type Config } from '../config';
 import { openDatabase } from '../db';
 import { Repository } from '../db/repository';
 import { NoteStore, UserStore } from '../db/users';
+import type { ZohoApi } from '../types';
 import { startDashboard } from './server';
 
 /**
@@ -52,6 +53,53 @@ export const DEMO_TEAM: Array<{ name: string; email: string; role: Role }> = [
   { name: 'Anita Sharma', email: 'anita@acme.example', role: 'staff' },
   { name: 'Suresh Iyer', email: 'suresh@acme.example', role: 'viewer' },
 ];
+
+/** What a signature would give, for the made-up strangers whose enquiries are still open in the showcase. */
+const STRANGER_DETAILS: Record<string, { contactName: string; phone: string; address: string; city: string; state: string; zip: string; gstin: string }> = {
+  'Sree Rama Fabricators': { contactName: 'Ramana Murthy', phone: '+91 98480 12345', address: 'Plot 14, Autonagar', city: 'Vijayawada', state: 'Andhra Pradesh', zip: '520007', gstin: '37AAKFS1234C1Z5' },
+  'Delta Agro Tools': { contactName: 'Lakshmi Prasad', phone: '+91 99890 54321', address: '2-45, Main Road', city: 'Eluru', state: 'Andhra Pradesh', zip: '534001', gstin: '' },
+  'Vijaya Hardware Mart': { contactName: 'Vijay Kumar', phone: '', address: '', city: 'Guntur', state: 'Andhra Pradesh', zip: '', gstin: '' },
+  'Coastal Packaging Co': { contactName: 'Suma Reddy', phone: '+91 94400 11223', address: 'Industrial Estate, Phase 2', city: 'Kakinada', state: 'Andhra Pradesh', zip: '533003', gstin: '37AABCC5678D1Z2' },
+};
+
+/**
+ * A pretend Zoho Books for the showcase: it remembers the customers added from the dashboard and nothing else, so the
+ * "Add to Zoho Books" button can be shown working without touching a real account.
+ */
+export function demoZoho(): ZohoApi {
+  const added: Array<Record<string, unknown>> = [];
+  return {
+    get: async <T>() => ({ organization: { is_registered_for_gst: true } }) as T,
+    getAllPages: async <T>() => added as T[],
+    post: async <T>(_path: string, body: unknown) => {
+      const b = body as Record<string, unknown>;
+      added.push({ contact_id: `DEMO-C${added.length + 1}`, contact_name: b.contact_name, email: (b.contact_persons as Array<{ email?: string }> | undefined)?.[0]?.email ?? '' });
+      return {} as T;
+    },
+  };
+}
+
+/**
+ * In the showcase there is no mailbox, so this plays the part of the assistant's retry: for each kept email whose customer
+ * was added from the dashboard, make the (pretend) quote. Returns how many were made.
+ */
+export function finishDemoHeld(repo: Repository, orgId = '60092547421'): number {
+  let made = 0;
+  for (const id of repo.heldDue(0, 50)) {
+    const e = repo.get(id);
+    if (!e || e.status !== 'HALTED_CUSTOMER_NOT_FOUND' || !repo.auditTrail(id).some((a) => a.event === 'CUSTOMER_ADDED')) continue;
+    const number = 900 + id;
+    repo.recordEstimate(id, {
+      customerId: 'DEMO', customerName: e.companyInEmail ?? 'New customer', matchTier: 'name', estimateId: `DEMO-${number}`, estimateNumber: `QT-${String(number).padStart(6, '0')}`,
+      quoteUrl: `https://books.zoho.in/app/${orgId}#/quotes`, totalAmount: 18_450, currencyCode: 'INR', lineCount: 4, matchedCount: 4, unmatchedCount: 0, unreadableRows: 0, reviewFlags: [],
+    });
+    repo.markNotification(id, 'C_DRAFT_CREATED');
+    repo.releaseHeld(id);
+    repo.finish(id, 'QUOTE_CREATED');
+    made++;
+  }
+  return made;
+}
 
 export async function seedDemo(repo: Repository, users: UserStore, notes: NoteStore, setClock: (d: Date) => void, now: Date, password: string, orgId = '60092547421'): Promise<number> {
   const rand = rng(20261021);
@@ -114,6 +162,8 @@ export async function seedDemo(repo: Repository, users: UserStore, notes: NoteSt
     repo.audit(id, 'EMAIL_METADATA', 'llm');
     repo.audit(id, 'EXCEL_PARSED', `${3 + Math.floor(rand() * 5)} lines, 0 unreadable, 0 ignored, columns by rules`);
     repo.markNotification(id, 'CUSTOMER_NOT_FOUND');
+    const d = STRANGER_DETAILS[who.company];
+    repo.setCustomerDraft(id, { companyName: who.company, contactName: d?.contactName ?? '', email: who.email, phone: d?.phone ?? '', address: d?.address ?? '', city: d?.city ?? '', state: d?.state ?? '', zip: d?.zip ?? '', gstin: d?.gstin ?? '', source: 'llm' });
     repo.finish(id, 'HALTED_CUSTOMER_NOT_FOUND', `Sender email "${who.email}": no active customer | Company name "${who.company}": no customer`);
     attention.push({ id, at });
     return id;
@@ -192,6 +242,16 @@ export async function seedDemo(repo: Repository, users: UserStore, notes: NoteSt
     setClock(new Date(a.at.getTime() + (3 + (i % 5)) * 3_600_000));
     notes.add(a.id, { id: uid(who), name: who.name }, 'handled', '');
   });
+  // the open new-customer enquiries keep their email, as the real assistant does, so the quote can follow once the customer is added
+  const keep = (id: number): void => void repo.holdMail(id, Buffer.from('demo email'), new Date(now.getTime() + 7 * day).toISOString(), 50);
+  const openNew = attention.slice(-3).filter((a) => repo.get(a.id)?.status === 'HALTED_CUSTOMER_NOT_FOUND');
+  openNew.forEach((a) => keep(a.id));
+  if (openNew.length === 0) {
+    const at = when(0, 9, 5);
+    const id = halted(at, STRANGERS[0] as (typeof STRANGERS)[0]);
+    attention.pop();
+    keep(id);
+  }
   pricing.slice(-6).forEach((d, i) => {
     const who = i % 2 === 0 ? karthik : anita;
     setClock(new Date(d.at.getTime() + 90 * 60_000));
@@ -286,7 +346,9 @@ async function main(): Promise<void> {
   }
   clock = new Date();
   const live = new UserStore(db);
-  const { port, close } = await startDashboard({ config, repo, users: live, notes: new NoteStore(db) });
+  const { port, close } = await startDashboard({ config, repo, users: live, notes: new NoteStore(db), zoho: { api: demoZoho(), organizationId: config.zoho?.organizationId ?? '60092547421' } });
+  const pretendRetry = setInterval(() => finishDemoHeld(repo, config.zoho?.organizationId ?? '60092547421'), 4000);
+  pretendRetry.unref();
   console.log(`\nDemo dashboard: http://localhost:${port}\nPassword for every demo login: ${password}\n${DEMO_TEAM.map((u) => `  ${u.role.padEnd(8)} ${u.email}`).join('\n')}\n(The sign-in page also has one-click buttons for each role. Ctrl+C to stop. Nothing here is real data.)`);
   const stop = async (): Promise<void> => {
     await close();

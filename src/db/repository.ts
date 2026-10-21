@@ -1,4 +1,5 @@
 import type { Db } from './index';
+import type { CustomerDraft } from '../llm/customerExtractor';
 import type { EnquiryStatus, NotificationKind } from '../types';
 
 export interface Enquiry {
@@ -29,6 +30,8 @@ export interface Enquiry {
   reviewFlags: string[];
   /** Set while the email is being kept for a customer who is not in Zoho Books yet. */
   holdUntil: string | null;
+  /** Customer details read from the email, to pre-fill the "add customer" form; null once the customer is added. */
+  customerDraft: CustomerDraft | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -107,8 +110,19 @@ interface EnquiryRow {
   unreadable_rows: number | null;
   review_flags: string | null;
   hold_until: string | null;
+  customer_draft: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parseDraft(json: string | null | undefined): CustomerDraft | null {
+  if (!json) return null;
+  try {
+    const d = JSON.parse(json) as CustomerDraft;
+    return typeof d === 'object' && d !== null && typeof d.companyName === 'string' ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 function toEnquiry(r: EnquiryRow): Enquiry {
@@ -139,6 +153,7 @@ function toEnquiry(r: EnquiryRow): Enquiry {
     unreadableRows: r.unreadable_rows,
     reviewFlags: r.review_flags ? r.review_flags.split(',').filter(Boolean) : [],
     holdUntil: r.hold_until ?? null,
+    customerDraft: parseDraft(r.customer_draft),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -406,6 +421,20 @@ export class Repository {
     }).immediate();
   }
 
+  setCustomerDraft(enquiryId: number, draft: CustomerDraft): void {
+    this.db.prepare('UPDATE enquiries SET customer_draft = ? WHERE id = ?').run(JSON.stringify(draft), enquiryId);
+  }
+
+  /** The customer was added: the details are no longer needed. */
+  clearCustomerDraft(enquiryId: number): void {
+    this.db.prepare('UPDATE enquiries SET customer_draft = NULL WHERE id = ?').run(enquiryId);
+  }
+
+  /** Check this held email on the next cycle instead of waiting out the usual interval. */
+  makeHeldDue(enquiryId: number): void {
+    this.db.prepare("UPDATE held_mail SET checked_at = '1970-01-01T00:00:00.000Z' WHERE enquiry_id = ?").run(enquiryId);
+  }
+
   /** Held enquiries that have not been checked for `minutes`, oldest first. */
   heldDue(minutes: number, limit: number): number[] {
     const cutoff = new Date(this.now().getTime() - minutes * 60_000).toISOString();
@@ -425,11 +454,11 @@ export class Repository {
     this.db.prepare('UPDATE held_mail SET checked_at = ? WHERE enquiry_id = ?').run(this.now().toISOString(), enquiryId);
   }
 
-  /** The email is no longer needed (the quote was made): delete the copy. */
+  /** The email is no longer needed (the quote was made, or the time is up): delete the copy and the contact details read from it. */
   releaseHeld(enquiryId: number): void {
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM held_mail WHERE enquiry_id = ?').run(enquiryId);
-      this.db.prepare('UPDATE enquiries SET hold_until = NULL WHERE id = ?').run(enquiryId);
+      this.db.prepare('UPDATE enquiries SET hold_until = NULL, customer_draft = NULL WHERE id = ?').run(enquiryId);
     })();
   }
 

@@ -6,6 +6,7 @@ import { FILTERS, RANGES, describeEvent, type OverviewModel, type ServiceRow } f
 import { esc, fmtDateTime, fmtMoney, initials, relTime, safeUrl } from './format';
 import type { EnquiryNote } from '../db/users';
 import { can } from '../auth/rbac';
+import type { CustomerDraft } from '../llm/customerExtractor';
 import type { Brand } from './brand';
 import { REVIEW_FLAG_TEXT, csrfField, flagChips, layout, roleChip, statusChip, tableView, type Viewer } from './views';
 
@@ -126,7 +127,19 @@ const FLAG_HELP: Record<string, string> = {
   DUPLICATE_ITEM: 'The same item code appears on more than one row. Both lines were kept.',
 };
 
-export function enquiryPage(opts: { clientName: string; viewer: Viewer; brand?: Brand; e: Enquiry; audit: Array<{ event: string; detail: string | null; at: string }>; notices: Array<{ kind: string; sentAt: string }>; notes: EnquiryNote[]; handled: boolean; flash?: string; tz: string; now: Date; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner'] }): string {
+export interface CustomerFormView {
+  values: CustomerDraft;
+  /** This person's role may add customers. */
+  canCreate: boolean;
+  /** The dashboard has a Zoho Books connection to add them with. */
+  available: boolean;
+  /** The email is still being kept, so the quote follows by itself. */
+  held: boolean;
+  /** Someone added the customer a few minutes ago, so the quote is on its way: show that instead of the form. */
+  addedRecently?: boolean;
+}
+
+export function enquiryPage(opts: { customerForm?: CustomerFormView; flashBad?: boolean; clientName: string; viewer: Viewer; brand?: Brand; e: Enquiry; audit: Array<{ event: string; detail: string | null; at: string }>; notices: Array<{ kind: string; sentAt: string }>; notes: EnquiryNote[]; handled: boolean; flash?: string; tz: string; now: Date; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner'] }): string {
   const { e, tz } = opts;
   const name = e.customerName || e.companyInEmail || e.senderEmail;
   const url = safeUrl(e.quoteUrl);
@@ -142,7 +155,7 @@ export function enquiryPage(opts: { clientName: string; viewer: Viewer; brand?: 
     ...(draft ? ([['Lines', `${e.lineCount ?? 0} read · ${e.matchedCount ?? 0} priced · ${e.unmatchedCount ?? 0} to price${e.unreadableRows ? ` · ${e.unreadableRows} unreadable` : ''}`], ['Quote total', esc(fmtMoney(e.totalAmount, e.currencyCode))], ['Quote number', url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(e.estimateNumber ?? '')} ↗</a>` : esc(e.estimateNumber ?? '')]] as Array<[string, string]>) : []),
     ['Attempts', String(e.attempts)],
   ];
-  const needs = !opts.handled && ['NEEDS_INFO', 'HALTED_CUSTOMER_NOT_FOUND', 'HALTED_CUSTOMER_AMBIGUOUS', 'FAILED'].includes(e.status) ? `<section class="panel mb"><h2>What to do next</h2><p class="p0">${esc(attentionReason(e))}</p></section>` : '';
+  const needs = !opts.handled && !opts.customerForm?.addedRecently && ['NEEDS_INFO', 'HALTED_CUSTOMER_NOT_FOUND', 'HALTED_CUSTOMER_AMBIGUOUS', 'FAILED'].includes(e.status) ? `<section class="panel mb"><h2>What to do next</h2><p class="p0">${esc(attentionReason(e))}</p></section>` : '';
   const flags = e.reviewFlags.length ? `<section class="panel mb"><h2>Please check before sending</h2>${e.reviewFlags.map((f) => `<p class="p8"><span class="flag nm0">${esc(REVIEW_FLAG_TEXT[f] ?? f)}</span>${esc(FLAG_HELP[f] ?? '')}</p>`).join('')}</section>` : '';
   const timeline = opts.audit
     .map((a) => {
@@ -162,11 +175,33 @@ export function enquiryPage(opts: { clientName: string; viewer: Viewer; brand?: 
   const noteForm = canNote
     ? `<form method="post" action="/enquiry/${e.id}/note" class="form"><input type="hidden" name="_csrf" value="${esc(opts.viewer.csrf)}"><label for="nb">Add a note for your team</label><textarea id="nb" name="body" rows="3" maxlength="500" placeholder="For example: called the customer, resending a clearer Excel"></textarea><div class="actions"><button class="btn" type="submit">Save note</button>${opts.handled ? `<button class="btn ghost" type="submit" formaction="/enquiry/${e.id}/reopen" formnovalidate>Reopen</button>` : `<button class="btn ghost" type="submit" formaction="/enquiry/${e.id}/handled" formnovalidate>Mark as handled</button>`}</div></form>`
     : `<p class="sub p0">Your role (${esc(opts.viewer.role)}) can read notes but not add them. Ask a manager if something should be recorded.</p>`;
-  const notesPanel = `<section class="panel mb" aria-labelledby="h-notes"><h2 id="h-notes">Team notes</h2><p class="sub">Kept on this server only. Nothing here is written to Zoho Books.</p>${opts.flash ? `<p class="okmsg" role="status">${esc(opts.flash)}</p>` : ''}${noteItems ? `<ul class="notes">${noteItems}</ul>` : '<p class="sub">No notes yet.</p>'}${noteForm}</section>`;
+  const cf = opts.customerForm;
+  const customerPanel = cf?.addedRecently
+    ? `<section class="panel mb" aria-labelledby="h-addcust"><h2 id="h-addcust">Customer added to Zoho Books</h2><p class="p0">${cf.held ? 'The quote is created automatically within a couple of minutes. Nobody needs to resend the email.' : 'This email is no longer being kept, so ask the sender to resend it.'} If nothing has happened after about 15 minutes, this form comes back so the details can be checked again.</p></section>`
+    : cf
+    ? (() => {
+        const v = cf.values;
+        const input = (id: string, label: string, name: string, value: string, max: number, required = false): string =>
+          `<div><label for="${id}">${esc(label)}</label><input id="${id}" name="${name}" type="text" value="${esc(value)}" maxlength="${max}" autocomplete="off"${required ? ' required' : ''}></div>`;
+        const next = cf.held
+          ? 'Adding the customer is the only step left. The email is being kept, and the quote is created automatically within a couple of minutes.'
+          : 'This email is no longer being kept, so after adding the customer, ask the sender to resend it.';
+        const flashHtml = opts.flash && opts.flashBad ? `<p class="badmsg" role="alert">${esc(opts.flash)}</p>` : '';
+        const body =
+          cf.canCreate && cf.available
+            ? `<form class="form cols" method="post" action="/enquiry/${e.id}/customer">${csrfField(opts.viewer)}${input('c-co', 'Company name', 'company', v.companyName, 100, true)}${input('c-ct', 'Contact person', 'contact', v.contactName, 80)}${input('c-em', 'Email', 'email', v.email, 254)}${input('c-ph', 'Phone', 'phone', v.phone, 20)}${input('c-ad', 'Address', 'address', v.address, 200)}${input('c-ci', 'City', 'city', v.city, 60)}${input('c-st', 'State', 'state', v.state, 40)}${input('c-zp', 'PIN code', 'zip', v.zip, 6)}${input('c-gs', 'GST number (if given)', 'gstin', v.gstin, 15)}<div class="actions"><button class="btn" type="submit">Add to Zoho Books</button></div></form>`
+            : `<dl class="facts">${[['Company', v.companyName], ['Contact', v.contactName], ['Email', v.email], ['Phone', v.phone], ['Address', [v.address, v.city, v.state, v.zip].filter(Boolean).join(', ')], ['GST number', v.gstin]]
+                .filter(([, val]) => val)
+                .map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`)
+                .join('')}</dl><p class="sub p8">${cf.canCreate ? 'Adding customers from here needs the quote service to be running. Add the customer in Zoho Books instead.' : `Your role (${esc(opts.viewer.role)}) cannot add customers. Ask a staff member or manager.`}</p>`;
+        return `<section class="panel mb" aria-labelledby="h-addcust"><h2 id="h-addcust">Add this customer to Zoho Books</h2><p class="sub">These details were read from the email. Check them, fix anything that is wrong, then add the customer. Nothing is created until a person clicks the button.</p>${flashHtml}${body}<p class="sub p8">${esc(next)}</p></section>`;
+      })()
+    : '';
+  const notesPanel = `<section class="panel mb" aria-labelledby="h-notes"><h2 id="h-notes">Team notes</h2><p class="sub">Kept on this server only. Nothing here is written to Zoho Books.</p>${opts.flash && !opts.flashBad ? `<p class="okmsg" role="status">${esc(opts.flash)}</p>` : ''}${noteItems ? `<ul class="notes">${noteItems}</ul>` : '<p class="sub">No notes yet.</p>'}${noteForm}</section>`;
   const body = `<p class="back"><a href="/enquiries">← All enquiries</a></p>
 <div class="head mid"><h1 class="pt big">${esc(name)}</h1>${url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Open the quote in Zoho Books ↗</a>` : ''}</div>
 <p class="chipsrow">${statusChip(e.status)}${handledChip}${flagChips(e.reviewFlags)}</p>
-${needs}${flags}${notesPanel}
+${needs}${customerPanel}${flags}${notesPanel}
 <div class="row r2"><section class="panel"><h2>The enquiry</h2><p class="sub">What came in, and what it became.</p><dl class="facts">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl></section>
 <section class="panel"><h2>What the assistant did</h2><p class="sub">Step by step, in order.</p><ol class="tl">${timeline}</ol></section></div>`;
   return layout({ title: `${name}`, active: 'enquiries', clientName: opts.clientName, viewer: opts.viewer, ...(opts.brand ? { brand: opts.brand } : {}), demo: opts.demo, live: opts.live, ...(opts.banner ? { banner: opts.banner } : {}), body });
@@ -200,7 +235,7 @@ export function dataPage(opts: { config: Config; clientName: string; viewer: Vie
   const body = `<h1 class="pt">Your data</h1><p class="sub ptsub">Where everything lives, who can see it, and how long it is kept.</p>
 <div class="three">
 <section class="panel"><span class="eyebrow">In your Zoho Books</span><h3>Customers, items, prices, quotes</h3><p>All the business data stays in your own Zoho Books account. The assistant only <b>creates draft quotes</b>. It never sends one to a customer and never changes a customer or an item.</p></section>
-<section class="panel"><span class="eyebrow">On this server</span><h3>A log of what happened</h3><p>For each email: who sent it, the subject, the Excel file name, the result, the quote number and total, and the steps taken. ${holdDays > 0 ? `<b>No email text and no Excel files are kept, with one exception:</b> an email from a customer who is not in your Zoho Books yet is held for up to <b>${holdDays} days</b>, so its quote can be made automatically once you add them. It is deleted as soon as the quote is made.` : '<b>No email text and no Excel files are stored.</b>'} Records are deleted after <b>${days} days</b>.</p></section>
+<section class="panel"><span class="eyebrow">On this server</span><h3>A log of what happened</h3><p>For each email: who sent it, the subject, the Excel file name, the result, the quote number and total, and the steps taken. ${holdDays > 0 ? `<b>No email text and no Excel files are kept, with one exception:</b> an email from a customer who is not in your Zoho Books yet is held for up to <b>${holdDays} days</b>, together with the contact details read from its signature, so its quote can be made automatically once you add them. They are deleted as soon as the customer is added and the quote is made.` : '<b>No email text and no Excel files are stored.</b>'} Records are deleted after <b>${days} days</b>.</p></section>
 <section class="panel"><span class="eyebrow">Sent to Claude, read once</span><h3>The text of the email</h3><p>To understand a messy email, its text (and a few top rows of an unusual spreadsheet) is sent to Anthropic's Claude to read. Our server does not keep it. How Anthropic handles it follows the terms of your Anthropic account.</p></section>
 </div>
 <div class="row r2 mt"><section class="panel"><h2>Your mailbox</h2><p class="sub p0">The original emails stay in your mailbox. The assistant marks them as read once handled and does not copy or delete them.</p></section>

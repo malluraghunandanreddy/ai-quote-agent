@@ -28,11 +28,11 @@ const hashed = async (): Promise<string> => (hashOnce ??= await hashPassword(PAS
 
 describe('roles and permissions', () => {
   it('each role gets exactly what it should, and every role includes the one below it', () => {
-    const allowed = (r: Role): string[] => (['overview.view', 'enquiries.view', 'enquiries.annotate', 'enquiries.export', 'status.view', 'team.view', 'team.manage', 'activity.view'] as const).filter((p) => can(r, p));
+    const allowed = (r: Role): string[] => (['overview.view', 'enquiries.view', 'enquiries.annotate', 'customers.create', 'enquiries.export', 'status.view', 'team.view', 'team.manage', 'activity.view'] as const).filter((p) => can(r, p));
     assert.deepEqual(allowed('viewer'), ['overview.view', 'enquiries.view']);
-    assert.deepEqual(allowed('staff'), ['overview.view', 'enquiries.view', 'enquiries.annotate']);
-    assert.deepEqual(allowed('manager'), ['overview.view', 'enquiries.view', 'enquiries.annotate', 'enquiries.export', 'status.view', 'team.view', 'team.manage']);
-    assert.equal(allowed('owner').length, 8);
+    assert.deepEqual(allowed('staff'), ['overview.view', 'enquiries.view', 'enquiries.annotate', 'customers.create']);
+    assert.deepEqual(allowed('manager'), ['overview.view', 'enquiries.view', 'enquiries.annotate', 'customers.create', 'enquiries.export', 'status.view', 'team.view', 'team.manage']);
+    assert.equal(allowed('owner').length, 9);
     for (let i = 1; i < ROLES.length; i++) for (const p of allowed(ROLES[i - 1] as Role)) assert.ok(allowed(ROLES[i] as Role).includes(p), `${ROLES[i]} lacks ${p}`);
   });
 

@@ -13,6 +13,7 @@ import {
 import { ExcelParseError, parseRfq } from '../excel/parser';
 import { normalizeUom } from '../excel/normalizer';
 import { LlmClient } from '../llm/client';
+import { extractCustomerDraft } from '../llm/customerExtractor';
 import { extractEmailMetadata, heuristicMeta } from '../llm/emailExtractor';
 import { createColumnResolver } from '../llm/headerResolver';
 import { errorMessage, logger, setLogLevel } from '../logger';
@@ -246,6 +247,9 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
         tried: lookup.tried,
       }),
     );
+    // For a customer who simply is not there yet: read their details from the signature once, so a person can review
+    // and add them with one click. (Not for a clash between customers that already exist.)
+    if (!ambiguous && !repo.get(id)?.customerDraft) repo.setCustomerDraft(id, await extractCustomerDraft(rt.llm, mail, enquiry.meta));
     const status = ambiguous ? 'HALTED_CUSTOMER_AMBIGUOUS' : 'HALTED_CUSTOMER_NOT_FOUND';
     repo.finish(id, status, lookup.tried.join(' | '));
     logger.warn(status, { enquiryId: id, sender: mail.from.address, tried: lookup.tried });

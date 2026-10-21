@@ -29,6 +29,9 @@ export class FakeZoho implements ZohoApi {
   failNextCreate: Error | null = null;
   /** Whether the stand-in org is GST-registered (drives the "no Place of Supply" warning). */
   gstRegistered = true;
+  /** Bodies of customers created through POST /contacts. */
+  createdContacts: Array<Record<string, unknown>> = [];
+  failNextContact: Error | null = null;
 
   constructor(
     private readonly contacts: ZohoContact[],
@@ -81,6 +84,18 @@ export class FakeZoho implements ZohoApi {
 
   async post<T = unknown>(path: string, body: unknown): Promise<T> {
     this.calls.push(`POST ${path}`);
+    if (path === '/contacts') {
+      const req = body as { contact_name: string; company_name?: string; contact_persons?: Array<{ email?: string }> } & Record<string, unknown>;
+      if (this.failNextContact) {
+        const err = this.failNextContact;
+        this.failNextContact = null;
+        throw err;
+      }
+      this.createdContacts.push(req);
+      const email = req.contact_persons?.[0]?.email;
+      this.contacts.push({ contact_id: `NEW-${this.contacts.length + 1}`, contact_name: req.contact_name, ...(req.company_name ? { company_name: req.company_name } : {}), ...(email ? { email } : {}), status: 'active', contact_type: 'customer' });
+      return { code: 0, message: 'The contact has been added.' } as T;
+    }
     if (path !== '/estimates') throw new Error(`FakeZoho: unhandled POST ${path}`);
     if (this.failNextCreate) {
       const err = this.failNextCreate;

@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     if (users.count() === 0) {
       logger.warn('The dashboard is off: nobody has a login yet. Set DASHBOARD_PASSWORD and DASHBOARD_OWNER_EMAIL in .env, or run: npm run users -- add you@company.com "Your Name" owner');
     } else {
-      dashboard = await startDashboard({ config, repo: rt.repo, users, notes, clock: rt.clock });
+      dashboard = await startDashboard({ config, repo: rt.repo, users, notes, clock: rt.clock, zoho: { api: rt.zoho, organizationId: rt.zohoConfig.organizationId } });
       logger.info('Dashboard started', { address: `http://${config.dashboard.host}:${dashboard.port}`, publicUrl: config.dashboard.publicUrl });
     }
   } catch (err) {

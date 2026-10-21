@@ -355,6 +355,9 @@ export function describeEvent(event: string, detail: string | null): { what: str
   const d = detail ?? '';
   if (event === 'CLAIMED') return { what: 'Email received', more: d && d !== '(no attachment)' ? `Attachment: ${d}` : 'No attachment' };
   if (event === 'RETRY') return { what: 'Tried again', more: d };
+  if (event === 'HELD') return { what: 'Email kept for the new customer', more: d };
+  if (event === 'HOLD_EXPIRED') return { what: 'Stopped keeping the email', more: d };
+  if (event === 'CUSTOMER_ADDED') return { what: 'Customer added to Zoho Books', more: d };
   if (event === 'EMAIL_METADATA') return { what: 'Read the email text', more: d.startsWith('llm') ? 'Understood with Claude' : 'Read with simple rules' + (d.includes('flags=') ? ' · contained text addressed to an AI, which was ignored' : '') };
   if (event === 'EXCEL_PARSED') return { what: 'Read the Excel', more: d.replace('columns by rules', 'columns found by the standard rules').replace('columns by llm', 'columns placed with Claude, then checked') };
   if (event === 'CUSTOMER_RESOLVED') {

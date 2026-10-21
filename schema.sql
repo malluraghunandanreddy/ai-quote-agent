@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS enquiries (
   review_flags      TEXT,
   -- set while the email is kept waiting for a new customer to be added in Zoho Books
   hold_until        TEXT,
+  -- details of a not-yet-existing customer read from the email, to pre-fill the "add customer" form (cleared once added)
+  customer_draft    TEXT,
   created_at        TEXT    NOT NULL,
   updated_at        TEXT    NOT NULL
 );

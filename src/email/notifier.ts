@@ -298,15 +298,21 @@ export class MailNotifier implements Notifier {
       bullets: [
         ambiguous
           ? 'Decide which customer this sender belongs to and make the sender email / company name unambiguous in Zoho Books.'
-          : 'Create the customer in Zoho Books with a valid GSTIN / PAN and Place of Supply.',
-        'Then ask the sender to resend the enquiry (or forward it to the monitored inbox) so the draft quotation is created.',
+          : this.config.hold.days > 0
+            ? 'Open the enquiry in the dashboard, check the customer details read from the email, and click "Add to Zoho Books" (or add the customer in Zoho Books yourself, with a valid GSTIN / PAN and Place of Supply).'
+            : 'Create the customer in Zoho Books with a valid GSTIN / PAN and Place of Supply.',
+        this.config.hold.days > 0
+          ? 'The draft quotation is then created automatically within a few minutes. The sender does not need to resend anything.'
+          : 'Then ask the sender to resend the enquiry (or forward it to the monitored inbox) so the draft quotation is created.',
       ],
     });
+    const base = this.config.dashboard.publicUrl;
     return this.deliver({
       subject: `[Quote agent] ${ambiguous ? 'Ambiguous customer' : 'Customer not found'}: ${oneLine(ctx.enquiry.senderEmail, 80)}`,
       to: [this.config.notify.internal],
       intro,
       sections,
+      ...(base ? { link: { label: 'Open this enquiry in the dashboard', url: `${base}/enquiry/${ctx.enquiry.enquiryId}` } } : {}),
     });
   }
 

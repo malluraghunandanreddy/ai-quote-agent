@@ -119,7 +119,7 @@ export function attentionReason(e: Enquiry): string {
   switch (e.status) {
     case 'HALTED_CUSTOMER_NOT_FOUND':
       return e.holdUntil
-        ? `Customer not found in Zoho${e.companyInEmail ? ` (company in the email: ${e.companyInEmail})` : ''}. Add this customer in Zoho Books. The email is being kept, and the quote is created automatically within a few minutes of the customer being added. Nobody needs to resend it.`
+        ? `Customer not found in Zoho${e.companyInEmail ? ` (company in the email: ${e.companyInEmail})` : ''}. Open the enquiry, check the details read from the email and click Add to Zoho Books (or add the customer in Zoho Books yourself). The email is being kept, and the quote is created automatically within a few minutes. Nobody needs to resend it.`
         : `Customer not found in Zoho${e.companyInEmail ? ` (company in the email: ${e.companyInEmail})` : ''}. Create it, then ask the sender to resend.`;
     case 'HALTED_CUSTOMER_AMBIGUOUS':
       return e.holdUntil

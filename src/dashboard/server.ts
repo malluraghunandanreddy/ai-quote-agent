@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { assignableRoles, can, canManage, isRole, roleLabel, type Permission } from '../auth/rbac';
+import { GSTIN, canonicalState, type CustomerDraft } from '../llm/customerExtractor';
+import { addCustomer } from '../zoho/customerCreate';
+import type { ZohoApi } from '../types';
 import { generatePassword, hashPassword, looksLikeEmail, passwordProblem, spendCheckTime, verifyPassword } from '../auth/passwords';
 import type { Config } from '../config';
 import type { Repository } from '../db/repository';
@@ -22,6 +25,8 @@ export interface DashboardDeps {
   /** Shared with the caller when it needs to create the first owner; made from the repository's database otherwise. */
   users?: UserStore;
   notes?: NoteStore;
+  /** The Zoho Books connection, so an approved new customer can be added from an enquiry. Without it the button is not offered. */
+  zoho?: { api: ZohoApi; organizationId: string };
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -63,7 +68,27 @@ const safeEqual = (a: string, b: string): boolean => {
   return crypto.timingSafeEqual(x, y);
 };
 
-const SAVED: Record<string, string> = { note: 'Note saved.', handled: 'Marked as handled.', reopened: 'Reopened.' };
+const SAVED: Record<string, string> = {
+  note: 'Note saved.',
+  handled: 'Marked as handled.',
+  reopened: 'Reopened.',
+  customer: 'Customer added to Zoho Books. The quote is created automatically within a couple of minutes.',
+  customer_exists: 'That customer is already in Zoho Books. The quote is created automatically within a couple of minutes.',
+  customer_resend: 'Customer added to Zoho Books. This email is no longer being kept, so ask the sender to resend it and it will be quoted straight away.',
+};
+
+/** Read and check the "add customer" form. Returns what the person typed, and what is wrong with it. */
+function readCustomerForm(f: URLSearchParams): { values: CustomerDraft; errors: string[] } {
+  const get = (k: string, max: number): string => (f.get(k) ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const values: CustomerDraft = { companyName: get('company', 100), contactName: get('contact', 80), email: get('email', 254), phone: get('phone', 20), address: get('address', 200), city: get('city', 60), state: canonicalState(get('state', 40)), zip: get('zip', 6), gstin: get('gstin', 15).toUpperCase(), source: 'rules' };
+  const errors: string[] = [];
+  if (!values.companyName) errors.push('Please enter the company name.');
+  if (values.email && !looksLikeEmail(values.email)) errors.push('That email address does not look right.');
+  if (values.phone && !/^[+\d][\d\s().-]{5,19}$/.test(values.phone)) errors.push('The phone number may only contain digits, spaces, + and -.');
+  if (values.zip && !/^\d{6}$/.test(values.zip)) errors.push('The PIN code must be 6 digits.');
+  if (values.gstin && !GSTIN.test(values.gstin)) errors.push('That GST number does not look right (15 characters, for example 37ABCDE1234F1Z5).');
+  return { values, errors };
+}
 const DENIED_TITLE = 'Not available for your role';
 
 /**
@@ -263,6 +288,40 @@ export function createDashboardServer(deps: DashboardDeps): http.Server {
     }
 
     // --- enquiry notes (staff and up) ----------------------------------------------------------------------------------
+    const enquiryView = (id: number, flash?: { text: string; error?: boolean }, form?: CustomerDraft): string => {
+      const e = repo.get(id)!;
+      const needsCustomer = e.status === 'HALTED_CUSTOMER_NOT_FOUND';
+      const addedAt = repo.auditTrail(id).filter((a) => a.event === 'CUSTOMER_ADDED').map((a) => Date.parse(a.at)).sort((a, b) => b - a)[0];
+      const addedRecently = addedAt !== undefined && now.getTime() - addedAt < 15 * 60_000 && !form;
+      const customerForm = needsCustomer && !notes.isHandled(id)
+        ? { addedRecently, values: form ?? e.customerDraft ?? { companyName: e.companyInEmail ?? '', contactName: '', email: e.senderEmail, phone: '', address: '', city: '', state: '', zip: '', gstin: '', source: 'rules' as const }, canCreate: can(me.role, 'customers.create'), available: Boolean(deps.zoho), held: e.holdUntil !== null }
+        : undefined;
+      return enquiryPage({ ...common, e, audit: repo.auditTrail(e.id), notices: repo.notificationsFor(e.id), notes: notes.forEnquiry(e.id), handled: notes.isHandled(e.id), ...(flash ? { flash: flash.text } : {}), ...(flash?.error ? { flashBad: true } : {}), ...(customerForm ? { customerForm } : {}), tz, now });
+    };
+
+    // --- add the new customer to Zoho Books, after a person has checked the details ------------------------------------
+    const addRoute = /^\/enquiry\/(\d{1,9})\/customer$/.exec(path);
+    if (addRoute && method === 'POST') {
+      if (!need('customers.create')) return;
+      const id = Number(addRoute[1]);
+      const e = repo.get(id);
+      if (!e) return send(res, 404, msg('Enquiry not found', 'It may have been removed after the retention period.', viewer));
+      if (!deps.zoho) return send(res, 503, enquiryView(id, { text: 'Adding customers from here needs the quote service to be running with its Zoho Books connection. Add the customer in Zoho Books instead.', error: true }, readCustomerForm(f).values));
+      if (e.status !== 'HALTED_CUSTOMER_NOT_FOUND') return redirect(res, `/enquiry/${id}`);
+      const { values, errors } = readCustomerForm(f);
+      if (errors.length > 0) return send(res, 400, enquiryView(id, { text: errors.join(' '), error: true }, values));
+      const added = await addCustomer(deps.zoho.api, deps.zoho.organizationId, values, `Added from an enquiry by the quote assistant, approved by ${me.name} on ${now.toISOString().slice(0, 10)}.`);
+      if (added.status === 'failed') {
+        users.logEvent({ actor, event: 'customer_add_failed', target: enquiryLabel(id), detail: added.message, ip });
+        return send(res, 502, enquiryView(id, { text: `Zoho Books did not accept the customer: ${added.message}`, error: true }, values));
+      }
+      repo.clearCustomerDraft(id);
+      repo.makeHeldDue(id);
+      repo.audit(id, 'CUSTOMER_ADDED', `${added.name}: ${added.status === 'created' ? 'added to Zoho Books' : 'already in Zoho Books'}, approved by ${me.name}`);
+      users.logEvent({ actor, event: 'customer_added', target: enquiryLabel(id), detail: `${added.name} (${added.status === 'created' ? 'added to Zoho Books' : 'already there'})`, ip });
+      return redirect(res, `/enquiry/${id}?saved=${added.status === 'exists' ? 'customer_exists' : e.holdUntil ? 'customer' : 'customer_resend'}`);
+    }
+
     const act = /^\/enquiry\/(\d{1,9})\/(note|handled|reopen)$/.exec(path);
     if (act && method === 'POST') {
       if (!need('enquiries.annotate')) return;
@@ -372,7 +431,7 @@ export function createDashboardServer(deps: DashboardDeps): http.Server {
       if (!e) return send(res, 404, msg('Enquiry not found', 'It may have been removed after the retention period.', viewer));
       const saved = url.searchParams.get('saved') ?? '';
       const flash = saved === 'empty' ? 'Please write something before saving a note.' : SAVED[saved];
-      return send(res, 200, enquiryPage({ ...common, e, audit: repo.auditTrail(e.id), notices: repo.notificationsFor(e.id), notes: notes.forEnquiry(e.id), handled: notes.isHandled(e.id), ...(flash ? { flash } : {}), tz, now }));
+      return send(res, 200, enquiryView(e.id, flash ? { text: flash } : undefined));
     }
     if (path === '/status') {
       if (!need('status.view')) return;

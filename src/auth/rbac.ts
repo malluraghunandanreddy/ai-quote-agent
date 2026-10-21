@@ -12,6 +12,7 @@ export const PERMISSIONS = [
   'overview.view',
   'enquiries.view',
   'enquiries.annotate',
+  'customers.create',
   'enquiries.export',
   'status.view',
   'team.view',
@@ -41,14 +42,14 @@ export const ROLE_INFO: Readonly<Record<Role, RoleInfo>> = {
   staff: {
     label: 'Staff',
     rank: 2,
-    blurb: 'Works the enquiries. Adds notes and marks items handled so the team knows who did what.',
-    can: set('overview.view', 'enquiries.view', 'enquiries.annotate'),
+    blurb: 'Works the enquiries. Adds notes, marks items handled, and adds new customers to Zoho Books after checking their details.',
+    can: set('overview.view', 'enquiries.view', 'enquiries.annotate', 'customers.create'),
   },
   manager: {
     label: 'Manager',
     rank: 3,
     blurb: 'Looks after the desk. Also sees system status, downloads enquiry lists, and adds or removes staff and viewers.',
-    can: set('overview.view', 'enquiries.view', 'enquiries.annotate', 'enquiries.export', 'status.view', 'team.view', 'team.manage'),
+    can: set('overview.view', 'enquiries.view', 'enquiries.annotate', 'customers.create', 'enquiries.export', 'status.view', 'team.view', 'team.manage'),
   },
   owner: {
     label: 'Owner',
@@ -63,6 +64,7 @@ export const PERMISSION_TEXT: Readonly<Record<Permission, string>> = {
   'overview.view': 'See the overview and charts',
   'enquiries.view': 'Open enquiries and their step-by-step trail',
   'enquiries.annotate': 'Add notes and mark enquiries handled',
+  'customers.create': 'Add a new customer to Zoho Books (after checking the details)',
   'enquiries.export': 'Download an enquiry list (CSV)',
   'status.view': 'See system status and settings',
   'team.view': 'See who has a login',

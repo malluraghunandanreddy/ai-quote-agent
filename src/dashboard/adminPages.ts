@@ -186,7 +186,7 @@ export const ACTIVITY_FILTERS: Array<{ key: string; label: string; kinds?: strin
   { key: 'all', label: 'Everything' },
   { key: 'signins', label: 'Sign-ins', kinds: ['login', 'login_failed', 'login_locked', 'logout'] },
   { key: 'team', label: 'Team changes', kinds: ['owner_created', 'user_created', 'role_changed', 'user_deactivated', 'user_reactivated', 'password_reset', 'password_changed', 'user_unlocked', 'sessions_revoked', 'name_changed'] },
-  { key: 'work', label: 'Work on enquiries', kinds: ['note_added', 'marked_handled', 'reopened'] },
+  { key: 'work', label: 'Work on enquiries', kinds: ['note_added', 'marked_handled', 'reopened', 'customer_added', 'customer_add_failed'] },
   { key: 'downloads', label: 'Downloads', kinds: ['export'] },
 ];
 
@@ -212,6 +212,8 @@ export function describeSecurityEvent(e: SecurityEvent): string {
     case 'note_added': return `${who} added a note on ${t}`;
     case 'marked_handled': return `${who} marked ${t} as handled`;
     case 'reopened': return `${who} reopened ${t}`;
+    case 'customer_added': return `${who} added a new customer to Zoho Books from ${t}${e.detail ? `: ${e.detail}` : ''}`;
+    case 'customer_add_failed': return `${who} tried to add a customer from ${t}, but Zoho Books refused${e.detail ? `: ${e.detail}` : ''}`;
     case 'access_denied': return `${who} tried to open ${t}, which their role does not allow`;
     default: return `${who}: ${e.event}${t ? ` (${t})` : ''}`;
   }

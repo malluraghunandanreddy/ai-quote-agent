@@ -94,7 +94,8 @@ Replace the logo path, name and colour with theirs.
 **Click:** the first item (a customer-not-found one).
 
 On the enquiry page, **point at**, in order:
-- **What to do next**: "Customer not found in Zoho. Add this customer in Zoho Books. The email is being kept, and the quote is created automatically within a few minutes."
+- **Add this customer to Zoho Books**: "These details were read from the email's signature. A person checks them, can change anything, then clicks the button. Nothing is created until someone clicks." In `npm run demo` the button works against a pretend Zoho: click it, and within a few seconds the enquiry turns into a draft quote. (A viewer login sees the details but no button.)
+- **What to do next**: "Customer not found in Zoho. Check the details read from the email and click Add to Zoho Books. The email is being kept, and the quote is created automatically within a few minutes."
 - **What the assistant did**, on the right: "Step by step, in order. Nothing is hidden. If a customer ever asks 'what happened to my email?', you can answer in ten seconds."
 
 **Say:** "The 'Team notes' box is for your people. I'll come back to it, because it's where the different roles matter."
@@ -241,7 +242,7 @@ If the sender's company is not in Zoho Books yet, this is what happens, and it i
 
 1. **The email arrives** from the new customer. The assistant reads it but finds no matching customer.
 2. **It does not lose the email.** It keeps it for a few days, and your team gets an alert: "Customer not found". On the dashboard it shows under "Needs you", with the plain instruction "Add this customer in Zoho Books. The email is being kept, and the quote is created automatically."
-3. **Your team adds the customer in Zoho Books** (this is the human step: checking who they are, credit, GST). It takes a minute.
+3. **Your team adds the customer with one click** (this is the human step: checking who they are, credit, GST). Open the enquiry: the "Add this customer to Zoho Books" form is already filled in from the email signature (company, contact, phone, address, GST number). Fix anything that is wrong, then click **Add to Zoho Books**. It takes a minute. (They can still add the customer in Zoho Books by hand instead.)
 4. **Within about two minutes the draft quote appears by itself**, and the "Needs you" entry clears. Nobody asks the customer to resend anything, and the customer notices nothing.
 5. **From then on,** the customer is in Zoho Books, so their next emails go straight to a draft.
 
