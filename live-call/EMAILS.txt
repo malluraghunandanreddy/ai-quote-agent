@@ -1,0 +1,80 @@
+Live call: two emails from the client
+=====================================
+
+Both emails go TO:   yourname+rfq@gmail.com   (the "+rfq" part is required)
+Both emails come FROM the same address (the client's normal address).
+Zoho Books starts with the 12 catalogue items and no customers.
+
+Email 1's Excel has NO item codes: the items are written in the customer's own words, and the assistant
+finds them in the Zoho Books items by meaning. Email 2's Excel uses the item codes.
+
+
+EMAIL 1: a new customer, items in their own words (about 5 minutes)
+--------------------------------------------------------------------
+ATTACH:  RFQ_Nellore_Agro_Nov.xlsx
+
+SUBJECT:
+Quotation request - November requirement
+
+BODY:
+Dear Sir/Madam,
+
+Please send us your best quotation for the items in the attached Excel sheet.
+
+Delivery address: Godown 3, Port Road, Nellore, Andhra Pradesh 524001
+Delivery required: within 3 weeks of our order
+Please mention the make and the warranty period for each item.
+
+Thanks and regards,
+Anitha R
+Purchase Department
+Nellore Agro Exports
+Regd. Office: 12-3-45, Trunk Road, Nellore, Andhra Pradesh 524001
+Phone: +91 90000 12345
+
+WHAT HAPPENS:
+"Customer not found" under Needs you. Open the enquiry: the "Add this customer to Zoho Books" form is
+filled in from the signature (company, contact, email, phone, office address, city, state, PIN).
+Leave the email field as it is and click "Add to Zoho Books". About a minute later the draft appears
+by itself: 3 lines, each linked to a Zoho item by the AI and marked "AI MATCH - PLEASE CHECK" with what
+the customer wrote, total Rs 5,469 before tax. Delivery address and timeline are in the quote notes.
+
+What the customer wrote            ->  Zoho Books item
+Auxiliary relay with socket, ...   ->  Rly,Aux,Soc,P38,7A,4NO+4NC,230VAC     (Rs 150 x 10)
+Pendant control station, ...       ->  CNTRL STN,PENDANT,LOCAL,IP55          (Rs 635 x 3)
+Tubular heater, 2KW, 230V AC, ...  ->  HTR,TBLR,2KW,230VAC,CR NI STL         (Rs 344 x 6)
+
+
+EMAIL 2: the same customer again, with item codes (about 2 minutes, send after the first draft appears)
+-------------------------------------------------------------------------------------------------------
+ATTACH:  RFQ_Nellore_Agro_Dec.xlsx
+
+SUBJECT:
+Quotation request - December requirement
+
+BODY:
+Dear Sir/Madam,
+
+Thank you for the earlier quotation. Please also quote for the items in the attached Excel sheet
+for our December requirement.
+
+Delivery address: Godown 3, Port Road, Nellore, Andhra Pradesh 524001
+Delivery required: by 15 December
+Please quote prices inclusive of packing.
+
+Thanks and regards,
+Anitha R
+Purchase Department
+Nellore Agro Exports
+Regd. Office: 12-3-45, Trunk Road, Nellore, Andhra Pradesh 524001
+Phone: +91 90000 12345
+
+WHAT HAPPENS:
+No "Needs you" step and nothing to click. The customer is found by the sender's email address, every
+line is matched exactly by its item code, and the draft appears in Zoho Books within about a minute:
+4 lines, total Rs 29,764 before tax (20 x 1,217 + 4 x 732 + 3 x 538 + 2 x 441).
+
+
+AFTER THE CALL
+--------------
+Delete the two draft quotes and the Nellore Agro Exports customer in Zoho Books (or ask Claude to).

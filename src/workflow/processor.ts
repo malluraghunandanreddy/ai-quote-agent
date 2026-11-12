@@ -16,6 +16,8 @@ import { normalizeUom } from '../excel/normalizer';
 import { LlmClient } from '../llm/client';
 import { extractCustomerDraft } from '../llm/customerExtractor';
 import { extractEmailMetadata, heuristicMeta } from '../llm/emailExtractor';
+import { effectiveRecipients } from '../ops/recipients';
+import { suggestItems } from '../llm/itemMatcher';
 import { createColumnResolver } from '../llm/headerResolver';
 import { errorMessage, logger, setLogLevel } from '../logger';
 import type {
@@ -32,6 +34,34 @@ import { CustomerDirectory, resolveCustomer } from '../zoho/customerService';
 import { ItemCatalog } from '../zoho/itemService';
 import { buildEstimatePayload, calendarDate, createDraftEstimate, findEstimateByReference, quoteUrl } from '../zoho/quoteService';
 import { reviewFindings } from './sanity';
+
+interface AiHelp {
+  linked: Array<{ rowNumber: number; wrote: string; item: string }>;
+  suggested: number;
+}
+
+/** Let the AI link or suggest items for lines the exact rules could not match. Never throws; changes `lines` in place. */
+async function matchWithAi(rt: Runtime, enquiryId: number, lines: MatchedLine[]): Promise<AiHelp> {
+  const result: AiHelp = { linked: [], suggested: 0 };
+  const mode = rt.config.quote.itemAiMatch;
+  if (mode === 'off' || !rt.llm.isEnabled()) return result;
+  const open = lines.flatMap((l, index) => (l.match.status === 'unmatched' && l.match.reason === 'NOT_FOUND' ? [{ index, description: l.line.description, sku: l.line.sku }] : []));
+  if (open.length === 0) return result;
+  const found = await suggestItems(rt.llm, rt.catalog.activeItems(), open);
+  for (const [index, hit] of found) {
+    const target = lines[index];
+    if (!target) continue;
+    if (hit.linked && mode === 'link') {
+      target.match = { status: 'matched', by: 'ai', item: hit.item };
+      result.linked.push({ rowNumber: target.line.rowNumber, wrote: target.line.description.slice(0, 80), item: `${hit.item.name}${hit.item.sku ? ` (code ${hit.item.sku})` : ''}`.slice(0, 120) });
+    } else {
+      target.match = { status: 'unmatched', reason: 'NOT_FOUND', suggestion: hit.item };
+      result.suggested++;
+    }
+  }
+  if (result.linked.length + result.suggested > 0) rt.repo.audit(enquiryId, 'ITEM_AI_MATCH', `${result.linked.length} linked, ${result.suggested} suggested, of ${open.length} lines the rules could not match`);
+  return result;
+}
 
 /** Everything the workflow needs, wired once. Tests and the mock run swap individual parts. */
 export interface Runtime {
@@ -86,7 +116,7 @@ export function createRuntime(config: Config, overrides: RuntimeOverrides = {}):
     zoho,
     catalog: new ItemCatalog(zoho),
     customers: new CustomerDirectory(zoho),
-    notifier: overrides.notifier ?? new MailNotifier(config, llm),
+    notifier: overrides.notifier ?? new MailNotifier(config, llm, () => effectiveRecipients(repo, config)),
     mailbox: overrides.mailbox !== undefined ? overrides.mailbox : config.imap ? new ImapMailbox(config.imap, config.imapBatchLimit) : null,
     resolveColumns: createColumnResolver(llm),
     clock,
@@ -262,6 +292,8 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
   // 5. Items: SKU, then exact normalized name. Nothing is dropped.
   await rt.catalog.ensureLoaded();
   const lines: MatchedLine[] = parsed.lines.map((line) => ({ line, match: rt.catalog.match(line) }));
+  // Lines the exact rules could not match because the customer used their own words: the AI may link one only when very sure, else suggest.
+  const aiHelp = await matchWithAi(rt, id, lines);
 
   // 6. Draft quotation (idempotent: an earlier attempt's estimate is found by its reference number)
   const reference = `AIQ-${referenceSeed.slice(0, 16)}`;
@@ -299,7 +331,11 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
   lines.forEach(({ line, match }, i) => {
     const base = { rowNumber: line.rowNumber, sku: line.sku, description: line.description, quantity: line.quantity };
     if (match.status === 'unmatched') {
-      unmatched.push({ ...base, reason: match.reason === 'AMBIGUOUS' ? 'More than one Zoho item matches' : 'No matching item in Zoho Books' });
+      unmatched.push({
+        ...base,
+        reason: match.reason === 'AMBIGUOUS' ? 'More than one Zoho item matches' : 'No matching item in Zoho Books',
+        ...(match.suggestion ? { suggestion: `${match.suggestion.name}${match.suggestion.sku ? ` (code ${match.suggestion.sku})` : ''}` } : {}),
+      });
     } else if (stored?.[i] && stored[i].rate === 0) {
       unmatched.push({ ...base, reason: 'Zoho item has no price (rate 0.00)' });
     }
@@ -317,7 +353,7 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
     customerName: contact.company_name || contact.contact_name,
     matchTier: tier,
     unreadableRows: unreadable.length,
-    reviewFlags: [...new Set(findings.map((f) => f.flag))],
+    reviewFlags: [...new Set([...findings.map((f) => f.flag), ...(aiHelp.linked.length > 0 ? ['AI_ITEM_MATCH'] : [])])],
     customerId: contact.contact_id,
     estimateId: estimate.estimateId,
     estimateNumber: estimate.estimateNumber,
@@ -347,6 +383,10 @@ async function processEnquiry(rt: Runtime, id: number, unit: Unit, enquiry: Enqu
   }
 
   const warnings: string[] = findings.map((f) => f.message);
+  for (const l of aiHelp.linked.slice(0, 5)) {
+    warnings.push(`Row ${l.rowNumber}: the customer wrote "${l.wrote}"; the AI matched it to "${l.item}". Check it is the right item (the quote line says [AI MATCH - PLEASE CHECK]).`);
+  }
+  if (aiHelp.linked.length > 5) warnings.push(`...and ${aiHelp.linked.length - 5} more lines matched by the AI. Check each before sending.`);
   if (enquiry.meta.flags.includes('instructions_to_ai')) {
     warnings.push('The email contains text addressed to an AI system (for example "ignore previous instructions"). It was ignored and no free-text notes were taken from it. Treat this sender with caution.');
   }

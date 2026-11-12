@@ -914,8 +914,15 @@ describe('model-call economy', () => {
 
     const res = await processRawMessage(rt, await email({ xlsx: await RFQ(), messageId: '<m4@test>' }));
     assert.match(res.results[0]?.outcome ?? '', /^quote_created/);
-    assert.equal(calls(), 1, 'one call reads the email text; the rest is deterministic');
     assert.equal(llm.stats().byTask['email_extraction']?.calls, 1);
+    assert.equal(llm.stats().byTask['item_matching']?.calls, 1, 'one more call, only because "Part nobody stocks" could not be matched by code or name');
+    assert.equal(calls(), 2);
+
+    // every line found by code or name: the email text is the only thing the model reads
+    const before = calls();
+    const tidy = await processRawMessage(rt, await email({ xlsx: await workbook([['Item Code', 'Description', 'Qty', 'UOM'], ['R-7A', 'Relay 7A', 9, 'Nos']]), messageId: '<m5@test>' }));
+    assert.match(tidy.results[0]?.outcome ?? '', /^quote_created/);
+    assert.equal(calls() - before, 1, 'one call reads the email text; the rest is deterministic');
   });
 
   it('keeps the signature of a very long email, and leaves a short one untouched', () => {

@@ -17,6 +17,7 @@ export const PERMISSIONS = [
   'status.view',
   'team.view',
   'team.manage',
+  'alerts.manage',
   'activity.view',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -54,7 +55,7 @@ export const ROLE_INFO: Readonly<Record<Role, RoleInfo>> = {
   owner: {
     label: 'Owner',
     rank: 4,
-    blurb: 'Runs the account. Everything a manager can do, plus managers and other owners, and the activity log.',
+    blurb: 'Runs the account. Everything a manager can do, plus managers and other owners, who receives the alert emails, and the activity log.',
     can: set(...PERMISSIONS),
   },
 };
@@ -69,6 +70,7 @@ export const PERMISSION_TEXT: Readonly<Record<Permission, string>> = {
   'status.view': 'See system status and settings',
   'team.view': 'See who has a login',
   'team.manage': 'Add people, change roles, reset passwords',
+  'alerts.manage': 'Choose which email addresses receive the alerts (Sales and stakeholders)',
   'activity.view': 'See the sign-in and changes log',
 };
 

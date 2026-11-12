@@ -234,7 +234,17 @@ For the demo, the easy way to a complete draft is for the client to write as one
 
 1. **They send to `yourname+rfq@gmail.com`** (not `yourname@gmail.com`). The assistant only acts on mail addressed to the `+rfq` address; mail to the plain address is left alone. A few corporate mail systems reject a "+" in an address; if theirs does, ask them to send from a personal address.
 2. **The email names a customer that exists in your Zoho Books**, for example "Nellore Agro Exports" in the signature. Give them the ready-made email: the subject and text from `demo-emails/1-draft-ready/email.txt`. They send it from their own address. The dashboard then shows "matched by the company name in the email", which is the real behaviour for an unknown sender.
-3. **The Excel uses items that exist in your catalogue.** Send them the Excel from the same folder to attach (`npm run demo:kit` makes fresh ones). Result: a complete priced draft. If you later let them attach **their own** Excel, the assistant reads their lines, but your catalogue won't contain their items, so every line is marked "manual pricing required". That honestly shows it reading a stranger's file and never inventing a price. Do the prepared file first, theirs second, and only if you have rehearsed it.
+3. **The Excel uses items that exist in your catalogue.** Send them the Excel from the same folder to attach (`npm run demo:kit` makes fresh ones). Result: a complete priced draft. If you later let them attach **their own** Excel, the assistant reads their lines, but your catalogue won't contain their items, so every line is marked "manual pricing required". That honestly shows it reading a stranger's file and never inventing a price. Where a customer writes an item in their own words instead of your code (for example "Tubular heater 2 kW 230 V" for `HTR,TBLR,2KW,230VAC,CR NI STL`), the assistant compares the wording with your catalogue by meaning: when it is very sure it links the item (the quote line says "AI MATCH - PLEASE CHECK", so your team checks it), when it is only fairly sure it writes "Suggested: ..." on the line, and when the size, rating or voltage differs it leaves the line for a person. It never invents an item or a price. Do the prepared file first, theirs second, and only if you have rehearsed it.
+
+### Who gets which alert (2 minutes, owner login only)
+
+**Say:** "Your highest person decides who is told what. Nobody needs us, and nothing is edited in a file."
+
+1. Sign in as the owner. Click **Alerts** in the menu. Other roles do not see it: sign in as a viewer or manager afterwards to prove it.
+2. **One address for everything (the simple setup).** Show Sales and Stakeholders holding the same address. Click **Send a test to Sales** and show it arrive.
+3. **Different people.** Type a second address under **Stakeholders** (for example your own second mailbox) and click **Save**. Send an email that has one item not in the catalogue. Show that "Draft Quotation Created" arrives at the Sales address, and "New/Unmatched Products Identified" arrives only at the stakeholder address.
+4. Point out that an address belonging to a customer is refused (the screen explains why), so the assistant can never email a customer.
+5. Optional: **Activity** shows who changed the lists and when.
 
 ### A brand-new customer: the first email becomes a quote by itself
 
@@ -242,7 +252,7 @@ If the sender's company is not in Zoho Books yet, this is what happens, and it i
 
 1. **The email arrives** from the new customer. The assistant reads it but finds no matching customer.
 2. **It does not lose the email.** It keeps it for a few days, and your team gets an alert: "Customer not found". On the dashboard it shows under "Needs you", with the plain instruction "Add this customer in Zoho Books. The email is being kept, and the quote is created automatically."
-3. **Your team adds the customer with one click** (this is the human step: checking who they are, credit, GST). Open the enquiry: the "Add this customer to Zoho Books" form is already filled in from the email signature (company, contact, phone, address, GST number). Fix anything that is wrong, then click **Add to Zoho Books**. It takes a minute. (They can still add the customer in Zoho Books by hand instead.)
+3. **Your team adds the customer with one click** (this is the human step: checking who they are, credit, GST). Open the enquiry: the "Add this customer to Zoho Books" form is already filled in from the email signature (company, contact, phone, address, GST number). Fix anything that is wrong, then click **Add to Zoho Books**. It takes a minute. (They can still add the customer in Zoho Books by hand instead, and then click **Check again now** on the enquiry so the assistant looks straight away.)
 4. **Within about two minutes the draft quote appears by itself**, and the "Needs you" entry clears. Nobody asks the customer to resend anything, and the customer notices nothing.
 5. **From then on,** the customer is in Zoho Books, so their next emails go straight to a draft.
 
@@ -289,7 +299,7 @@ Delete their draft in Zoho Books yourself, or tell me to (I only delete Zoho dra
 
 ### If it goes wrong live
 - *Nothing appears after two minutes:* check the email was sent to the `+rfq` address and is unread, and that `npm start` is still running.
-- *"Customer not found":* say "this is the safe behaviour: it does not guess", show the "Needs you" list, add the customer in Zoho Books, and watch the quote appear by itself within two minutes. That is the new-customer flow above.
+- *"Customer not found":* say "this is the safe behaviour: it does not guess", show the "Needs you" list, add the customer (with the dashboard button, or in Zoho Books followed by **Check again now**), and watch the quote appear by itself within a couple of minutes. That is the new-customer flow above.
 - *They attach an old `.xls` file:* the assistant asks for a readable Excel instead of guessing. Ask them to resend as `.xlsx`.
 
 ---

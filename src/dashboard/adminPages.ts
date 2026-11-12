@@ -92,6 +92,27 @@ function rolesTable(): string {
   return `<div class="scroll"><table class="matrix"><caption class="sr">What each role can do</caption><thead><tr><th scope="col">Can…</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+export function alertsPage(o: PageBase & { recipients: { sales: string[]; stakeholders: string[]; fromDashboard: boolean }; canTest: boolean; domains: string[]; flash?: Flash; draft?: { sales: string; stakeholders: string } }): string {
+  const v = o.viewer;
+  const sales = o.draft?.sales ?? o.recipients.sales.join('\n');
+  const stakeholders = o.draft?.stakeholders ?? o.recipients.stakeholders.join('\n');
+  const same = !o.draft && o.recipients.sales.length === o.recipients.stakeholders.length && o.recipients.sales.every((a, i) => a === o.recipients.stakeholders[i]);
+  const test = (list: 'sales' | 'stakeholders', label: string): string =>
+    o.canTest ? `<form method="post" action="/alerts/test" class="inline">${csrfField(v)}<input type="hidden" name="list" value="${list}"><button class="btn ghost sm" type="submit">${esc(label)}</button></form>` : '';
+  const body = `<h1 class="pt">Alerts</h1><p class="sub ptsub">Choose who receives the quote assistant's emails. Each alert goes only to the addresses on its list, and never to a customer.</p>${flashHtml(o.flash)}
+<section class="panel mb" aria-labelledby="h-al"><h2 id="h-al">Who gets which alert</h2>
+<p class="sub">${o.recipients.fromDashboard ? 'These lists were set here by an owner.' : 'These addresses were set up when your assistant was installed. Save here to choose your own.'}${same ? ' Right now everything goes to the same address.' : ''}</p>
+<form class="form" method="post" action="/alerts">${csrfField(v)}
+<div><label for="al-s">Sales</label><textarea id="al-s" name="sales" rows="3" maxlength="1200" placeholder="sales@yourcompany.com">${esc(sales)}</textarea><p class="sub p8">One address per line. Gets "Draft Quotation Created", "Additional Information Required", "Customer not found", failures and the daily summary.</p></div>
+<div><label for="al-t">Stakeholders</label><textarea id="al-t" name="stakeholders" rows="3" maxlength="1200" placeholder="manager@yourcompany.com">${esc(stakeholders)}</textarea><p class="sub p8">One address per line. Gets "New/Unmatched Products Identified" when items could not be priced.</p></div>
+${o.domains.length ? `<p class="sub p8">Only addresses on ${esc(o.domains.join(', '))} are accepted.</p>` : ''}
+<div class="actions"><button class="btn" type="submit">Save</button></div></form></section>
+<section class="panel mb" aria-labelledby="h-at"><h2 id="h-at">Check that it works</h2><p class="sub">Sends one short test email to everyone on the saved list. Nothing goes to a customer.</p>
+<div class="actions">${test('sales', 'Send a test to Sales')}${test('stakeholders', 'Send a test to stakeholders')}${o.canTest ? '' : '<span class="sub">Sending a test needs the quote service to be running.</span>'}</div></section>
+${o.recipients.fromDashboard ? `<section class="panel mb" aria-labelledby="h-ar"><h2 id="h-ar">Go back to the addresses from setup</h2><p class="sub">Stops using the lists saved here and goes back to the addresses that were set up when the assistant was installed.</p><form method="post" action="/alerts/reset">${csrfField(v)}<div class="actions"><button class="btn ghost" type="submit">Go back to the setup addresses</button></div></form></section>` : ''}`;
+  return wrap(o, 'alerts', 'Alerts', body);
+}
+
 export function teamPage(o: PageBase & { people: User[]; flash?: Flash; draft?: { name?: string; email?: string; role?: string } }): string {
   const v = o.viewer;
   const manage = can(v.role, 'team.manage');

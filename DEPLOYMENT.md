@@ -1,114 +1,59 @@
-# Deploying the AI Quote Agent for a client
+# Installing the quote assistant for a client
 
-One installation per client (single-tenant). Two ways to run it:
+**One installation per client.** The client installs nothing: they get a web address and an owner login. You (the operator) put the assistant on a small Linux server, give it the client's own accounts, and hand the address over. The commands for each step are in [`deploy/README.md`](deploy/README.md); this page is the order of work and the checklist.
+
+> This page replaces an older guide that described the first Python prototype (Gemini, a Setup page). That prototype is not what is deployed.
+
+## Where it runs
 
 | | **A. We host it** (recommended) | **B. On the client's server** |
 |---|---|---|
-| Who runs the server | Us, on a cloud server for this client only | The client's IT (or us, by remote session) |
-| Address | `https://quotes.<client-domain>` (HTTPS) | Internal, e.g. `http://quote-agent.local:8000`, or behind their VPN / reverse proxy |
-| Commercials | Setup fee + monthly service (hosting, monitoring, updates, support) | Setup fee + annual maintenance |
-| Usage costs | Client's own Gemini billing account (pass-through); Zoho API is included in their Zoho plan | Same |
+| Who runs the server | You, on a small cloud server in an India region (one client per server, or several behind one shared HTTPS proxy) | The client's IT, or you by remote session |
+| Address | `https://quotes.<client-domain>` | Their internal address, or behind their own proxy or VPN |
+| Keys and passwords | You hold them | The client enters their own, so you never hold them |
+| Fits | Most clients: nothing for them to look after | A client whose rules require it on their own server |
 
-## 0. One-time, before the first client deployment
-- [ ] Keep the code in a **private Git repository**. Deploying and updating means `git clone` / `git pull`.
-- [ ] **Test the Docker build on a Linux server.** The Docker files exist but haven't been built yet, because
-      Docker wasn't available on the development machine.
-- [ ] Recommended before a paid go-live: a client login without Setup access, encrypted credentials,
-      automatic deletion of old email content (DPDP Act), and the Gemini **paid** tier.
+Server: Linux with Docker Engine and Docker Compose v2, about 1 GB of memory per client (a 1 vCPU, 2 GB server is plenty for one), ports 80 and 443 open (22 for you). Everything else is outgoing only: Zoho Books, the client's mailbox, and Anthropic's API.
 
-## Server requirements
-- Ubuntu 24.04 LTS (any Linux with Docker works); **2 vCPU, 4 GB RAM, 30 GB disk**.
-- **Outgoing** access only:
+## What you need from the client
 
-| Host | Port | Used for |
-|---|---|---|
-| `accounts.zoho.in`, `www.zohoapis.in` | 443 | Zoho Books login and API (`.com` / `.eu` etc. for other data centres) |
-| `imappro.zoho.in` / `smtppro.zoho.in` | 993 / 465 | Reading the inbox, sending notifications |
-| `generativelanguage.googleapis.com` | 443 | Gemini |
+- [ ] **A web address:** they add one DNS record, `quotes.<their-domain>` pointing at the server, before the first start (the HTTPS certificate is issued from it).
+- [ ] **Their Zoho Books connection:** the API client id, secret and refresh token, created in their own Zoho organisation by a Zoho Books admin (see `LIVE_DEMO_SETUP.md`, the Zoho Books API step), plus the organisation id and data centre (`in`, `com`, ...).
+- [ ] **The mailbox the requests arrive in:** its IMAP login, and a sender login for alert emails (SMTP). Gmail and Zoho Mail need an app password. Microsoft 365 is not supported yet.
+- [ ] **Their AI key** (an Anthropic API key from their own account), or you decide to carry it. It is a small cost: a typical quote is about ₹0.02 of AI.
+- [ ] **The owner's email address,** and the starting addresses for the Sales and stakeholder alerts (the owner can change them later in the dashboard, under Alerts).
+- [ ] **Their items and prices** in Zoho Books (the onboarding form can load them), and their customer-specific pricing rules.
 
-- No incoming internet connection is needed for the agent itself: it fetches mail by polling. Only people
-  opening the dashboard need to reach the server (port 443 for A; port 8000 or their proxy for B).
-- The dashboard's styling loads from `cdn.tailwindcss.com` in the **user's browser**. Staff browsers need
-  internet access, or ask us to bundle it.
+## Order of work
 
-## A. Hosted by us
-
-1. **Create the server** in an India region: AWS Mumbai, Azure Central India, Google Cloud Mumbai, or
-   DigitalOcean Bangalore. Firewall: 22 (your IP only), 80, 443.
-2. **DNS:** ask the client to add an A record, `quotes.<client-domain>` → the server's IP.
-3. **Install Docker** (official script): `curl -fsSL https://get.docker.com | sh`
-4. **Get the code and settings:**
-   ```bash
-   git clone <private-repo-url> quote-agent && cd quote-agent
-   cp .env.example .env && chmod 600 .env
-   ```
-   In `.env` set:
-   - `DOMAIN=quotes.<client-domain>` and `BIND_ADDRESS=127.0.0.1`
-   - `DASHBOARD_URL=https://quotes.<client-domain>` (used for links in emails)
-   - `LOCK_ERP_CONNECTOR=zoho_books` and `LOCK_AI_PROVIDER=gemini`
-   - `ADMIN_PASSWORD` (a strong password, kept by us)
-   - `MONITORED_INBOX`, `SALES_TEAM_EMAIL`, `ALERT_RECIPIENTS`
-5. **Start it:**
-   ```bash
-   docker compose --profile https up -d --build
-   ```
-   The HTTPS certificate is issued automatically on first start; the DNS record must already point at the server.
-6. **Configure:** open `https://quotes.<client-domain>`, log in, then go to **Setup**:
-   - Gemini key (from the client's own Google account and billing)
-   - **Connect Zoho Books**
-   - the mailbox app password
-   Then press **Test connections** and check every line is ✅.
-7. **Backups:** schedule them daily, keep 14, and copy them off the server.
-   ```bash
-   crontab -e
-   0 2 * * * cd ~/quote-agent && docker compose exec -T quote-agent python scripts/backup.py --keep 14
-   ```
-   Copy them out with `docker compose cp quote-agent:/data/backups ./backups`, then to S3 / Drive.
-8. **Monitoring:** check `docker compose ps` and `docker compose logs -f quote-agent`, and add an uptime check
-   on `https://quotes.<client-domain>/login`.
-
-## B. On the client's server
-- Same steps 3–6, run by their IT with this guide or by us over a remote session.
-- Internal-only access: keep `BIND_ADDRESS=0.0.0.0`, skip the `https` profile (`docker compose up -d --build`),
-  and open `http://<server>:8000` from their network. Alternatively, put it behind their existing reverse
-  proxy or VPN.
-- We enter the credentials on the Setup page during a screen-share. Their admin can then change
-  `ADMIN_PASSWORD` if they own the installation.
-- Backups (step 7) go to their storage.
-
-## Updating
-```bash
-docker compose exec -T quote-agent python scripts/backup.py     # always back up first
-git pull
-docker compose up -d --build              # add --profile https for option A
-```
-Database changes are applied automatically on start.
-
-## Restoring
-```bash
-docker compose stop quote-agent
-docker compose run --rm quote-agent python scripts/backup.py --restore /data/backups/<file>.tar.gz
-docker compose start quote-agent
-```
-
-## Where the data lives
-
-| What | Where |
-|---|---|
-| Settings and credentials | `.env` next to `docker-compose.yml` (mode 600, never shown in the browser) |
-| Enquiries, extracted lines, audit log, notification copies | SQLite database in the `quote-data` volume (`/data/poc_agent.db`) |
-| Backups | `/data/backups` in the same volume, plus your off-server copy |
-| Customers, products, prices, draft quotations | The client's own Zoho Books |
-
-Data that leaves the server goes only to Zoho Books and Zoho Mail (the client's own accounts) and to Google
-Gemini (email and attachment content, when AI is needed). Use Gemini's paid tier so Google doesn't use
-the content for training.
+1. **Once, for your server:** build the image on your computer, copy it and the `deploy` folder to the server, load it, and start the shared HTTPS proxy (`deploy/README.md`, "One-time setup of the server").
+2. **Per client:** run `deploy/new-client.sh <name> --mode proxy --domain quotes.<client-domain> --owner-email <owner> --client-name "<Client>"`. It makes the client's folder, a private settings file and a helper, and prints the owner's starting password once.
+3. **Fill the client's settings file** (`.env` in their folder): their Zoho Books connection, mailbox, alert addresses, AI key, branding, time zone, and `STAFF_COST_PER_HOUR` so the dashboard can show money saved.
+4. **Check, then start:** `./ctl.sh check` (lists anything missing and starts nothing), `./ctl.sh up`, `./ctl.sh status` until it says healthy, then `./ctl.sh preflight` to prove the real connections work (mailbox, alert emails, Zoho Books, Claude). It changes nothing.
+5. **Hand over the owner login:** the owner signs in with the starting password and chooses their own. Then delete the `DASHBOARD_PASSWORD` line from `.env` and run `./ctl.sh up` again.
+6. **Load their items** (and customers, if you want them there before the first email) with the onboarding form, then restart so the item list is fresh.
+7. **Rehearse on their real mailbox and their real Zoho Books:** send an email, watch the draft appear, check the alerts reach the right people, send the draft from Zoho Books to yourself. Do the same once with a brand-new customer (the one-click form).
+8. **Backups:** the service backs up nightly and keeps 14. Also copy the backup folder off the server on a schedule, and try one restore before go-live.
+9. **Pilot:** go live with every draft reviewed by their team, and agree what "working" means (share of quotes made without typing, time saved, lines needing manual pricing).
 
 ## Go-live checklist
-- [ ] HTTPS works (A) or internal URL reachable (B); admin password set
-- [ ] Zoho Books connected; real items checked (codes, prices, GST)
-- [ ] Mailbox connected; a real test email processed end to end
-- [ ] Sales and stakeholder addresses correct; rules set (unmatched products, mandatory fields)
-- [ ] Backups scheduled **and one restore tested**
-- [ ] Gemini on a paid billing account owned by the client, with a budget alert
-- [ ] Contract covers hosting or maintenance, data processing (Gemini), and our right to reuse the product
+
+- [ ] HTTPS address opens and the owner has their own password
+- [ ] Zoho Books connected; real items checked (codes, prices, GST), place of supply set on customers if the organisation uses GST
+- [ ] Mailbox connected; one real email processed end to end, including a new customer and a line that cannot be matched
+- [ ] Alert addresses correct for Sales and stakeholders (test emails sent from the Alerts page)
+- [ ] Logins created and roles checked (owner, manager, staff, viewer)
+- [ ] Backups running, copied off the server, and one restore tested
+- [ ] The AI key is on an account with a budget alert
+- [ ] The contract covers hosting or maintenance, the fact that email text is read by an AI service, and your right to reuse the product
+
+## Not yet proven
+
+- The Docker image and compose files have **never been built or run** on a Linux server (Docker was not available on the development computer). **Do a full trial install on a throwaway server before the first client.**
+- HTTPS through the proxy, the shared proxy with several clients, and the update and restore commands are untested for the same reason.
+- Nothing has been tried against a client's own Zoho Books organisation or their own mailbox: only the operator's demo accounts.
+- There is no automatic off-server backup, and no single screen across several clients.
+
+## Updating and support
+
+`deploy/README.md` has the update, rollback and restore commands. The database upgrades itself when a new version starts. Update one client first and watch `./ctl.sh logs`.

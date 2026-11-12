@@ -22,7 +22,7 @@ function world(over: Record<string, string> = {}) {
   const fake = new FakeZoho(contacts, items);
   const sent: string[] = [];
   const notifier = new Proxy({}, { get: (_t, name: string) => async () => (sent.push(name), { delivered: true, dryRun: false }) }) as unknown as Notifier;
-  const config = loadConfig({ AGENT_DB_PATH: ':memory:', NOTIFY_INTERNAL_EMAIL: 'team@acme.test', ...over });
+  const config = loadConfig({ AGENT_DB_PATH: ':memory:', NOTIFY_INTERNAL_EMAIL: 'team@acme.test', HOLD_CHECK_MINUTES: '2', ...over });
   const rt = createRuntime(config, { zoho: fake, zohoConfig: MOCK_ZOHO, mailbox: null, notifier, clock: () => now });
   rt.customers = new CustomerDirectory(fake, () => now.getTime());
   return {

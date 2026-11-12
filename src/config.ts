@@ -79,6 +79,7 @@ const EnvSchema = z
     ZOHO_HTTP_RETRIES: int(2, 0, 10),
     ZOHO_QUOTE_LINK_PATH: z.preprocess(blankToUndefined, z.enum(['quotes', 'estimates']).default('quotes')),
     ZOHO_SEND_ITEM_RATE: bool(false),
+    ITEM_AI_MATCH: z.preprocess(blankToUndefined, z.enum(['off', 'suggest', 'link']).default('link')),
     ESTIMATE_VALIDITY_DAYS: int(30, 1, 365),
 
     // LLM: Anthropic Claude Haiku. Optional: without a key the rules-only fallbacks run.
@@ -97,7 +98,9 @@ const EnvSchema = z
 
     // New customers: keep their first email and make the quote automatically once they are added in Zoho Books
     HOLD_NEW_CUSTOMER_DAYS: int(7, 0, 60),
-    HOLD_CHECK_MINUTES: int(2, 1, 60),
+    // Optional: the client's own email domains. When set, the dashboard only accepts alert addresses on these domains.
+    ALERT_ALLOWED_DOMAINS: csv(),
+    HOLD_CHECK_MINUTES: int(30, 1, 240),
     HOLD_MAX_EMAILS: int(50, 1, 500),
 
     // Idempotency and limits
@@ -250,9 +253,9 @@ export interface Config {
   imapBatchLimit: number;
   schedule: { cron: string; runOnStart: boolean };
   smtp: SmtpConfig | null;
-  notify: { internal: string; stakeholders: string[]; from: string };
+  notify: { internal: string; stakeholders: string[]; from: string; allowedDomains: string[] };
   zoho: ZohoConfig | null;
-  quote: { validityDays: number; linkPath: 'quotes' | 'estimates'; sendItemRate: boolean };
+  quote: { validityDays: number; linkPath: 'quotes' | 'estimates'; sendItemRate: boolean; itemAiMatch: 'off' | 'suggest' | 'link' };
   llm: {
     enabled: boolean;
     /** Why the LLM is off (null when enabled). Rules-only fallbacks run instead. */
@@ -369,9 +372,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
           from: e.SMTP_FROM ?? e.MONITORED_INBOX,
         }
       : null,
-    notify: { internal, stakeholders, from: e.SMTP_FROM ?? e.MONITORED_INBOX },
+    notify: { internal, stakeholders, from: e.SMTP_FROM ?? e.MONITORED_INBOX, allowedDomains: [...new Set(e.ALERT_ALLOWED_DOMAINS.map((d) => d.toLowerCase()))] },
     zoho,
-    quote: { validityDays: e.ESTIMATE_VALIDITY_DAYS, linkPath: e.ZOHO_QUOTE_LINK_PATH, sendItemRate: e.ZOHO_SEND_ITEM_RATE },
+    quote: { validityDays: e.ESTIMATE_VALIDITY_DAYS, linkPath: e.ZOHO_QUOTE_LINK_PATH, sendItemRate: e.ZOHO_SEND_ITEM_RATE, itemAiMatch: e.ITEM_AI_MATCH },
     llm: {
       enabled: llmDisabledReason === null,
       disabledReason: llmDisabledReason,

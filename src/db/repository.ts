@@ -359,6 +359,16 @@ export class Repository {
       .run(day, task, calls, inputTokens, outputTokens);
   }
 
+  /** Has this address ever written to us as a customer (sent an enquiry)? */
+  isCustomerAddress(address: string): boolean {
+    return this.db.prepare('SELECT 1 FROM enquiries WHERE lower(sender_email) = ? LIMIT 1').get(address.toLowerCase()) !== undefined;
+  }
+
+  /** Draft quotes created since `iso` (an enquiry that has a Zoho quote number). */
+  draftsSince(iso: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM enquiries WHERE estimate_number IS NOT NULL AND created_at >= ?').get(iso) as { n: number }).n;
+  }
+
   llmUsageSince(day: string): Array<{ day: string; task: string; calls: number; inputTokens: number; outputTokens: number }> {
     return this.db
       .prepare<[string], { day: string; task: string; calls: number; input_tokens: number; output_tokens: number }>(
@@ -435,11 +445,23 @@ export class Repository {
     this.db.prepare("UPDATE held_mail SET checked_at = '1970-01-01T00:00:00.000Z' WHERE enquiry_id = ?").run(enquiryId);
   }
 
-  /** Held enquiries that have not been checked for `minutes`, oldest first. */
+  /**
+   * Held enquiries that are due for another look, oldest first. This is only a safety net, because each look costs Zoho
+   * Books API calls and a customer nobody adds would otherwise be asked about all week: every `minutes` for the first day,
+   * then every 2 hours. `makeHeldDue` (a person added the customer from the dashboard, or clicked "Check again now") makes
+   * one due at once.
+   */
   heldDue(minutes: number, limit: number): number[] {
-    const cutoff = new Date(this.now().getTime() - minutes * 60_000).toISOString();
-    const rows = this.db.prepare('SELECT enquiry_id FROM held_mail WHERE checked_at <= ? ORDER BY held_at, enquiry_id LIMIT ?').all(cutoff, limit) as Array<{ enquiry_id: number }>;
-    return rows.map((r) => r.enquiry_id);
+    const now = this.now().getTime();
+    const rows = this.db.prepare('SELECT enquiry_id, held_at, checked_at FROM held_mail ORDER BY held_at, enquiry_id').all() as Array<{ enquiry_id: number; held_at: string; checked_at: string }>;
+    const every = (heldAt: string): number => {
+      const age = now - Date.parse(heldAt);
+      return Math.max(minutes, age < 86_400_000 ? minutes : 120) * 60_000;
+    };
+    return rows
+      .filter((r) => Date.parse(r.checked_at) <= now - every(r.held_at))
+      .slice(0, limit)
+      .map((r) => r.enquiry_id);
   }
 
   heldRaw(enquiryId: number): Buffer | undefined {

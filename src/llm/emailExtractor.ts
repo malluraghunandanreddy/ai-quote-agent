@@ -52,6 +52,9 @@ function clean(value: string | null | undefined, max: number): string | null {
   return s === '' || /^(n\/?a|none|null|not (stated|specified|provided))$/i.test(s) ? null : s.slice(0, max);
 }
 
+/** Short free text that ends up on the quote must not carry text aimed at an AI. */
+const dropIfAboutInstructions = (text: string | null): string | null => (text && NOTE_ABOUT_INSTRUCTIONS.test(text) ? null : text);
+
 const COMPANY_LINE =
   /\b(pvt\.?\s*ltd\.?|private limited|limited|ltd\.?|llp|llc|inc\.?|corp(oration)?|industries|enterprises|engineering|solutions|technologies|traders|company|co\.)\b/i;
 
@@ -64,13 +67,15 @@ export function heuristicMeta(mail: InboundMail): EnquiryMeta {
     .find((l) => l.length <= 80 && COMPANY_LINE.test(l) && !l.includes('@') && !/https?:\/\//i.test(l));
   const timelineLine = lines.find((l) => /\b(deliver(y|ed)?|lead time|required by|needed by)\b/i.test(l));
   const name = mail.from.name && mail.from.name.toLowerCase() !== mail.from.address.toLowerCase() ? mail.from.name : null;
+  const flagged = looksLikeInstructionsToAi(mail.latestText);
   return {
     companyName: clean(companyLine, LIMITS.company),
     contactName: clean(name, LIMITS.contact),
     deliveryAddress: null,
-    deliveryTimeline: clean(timelineLine, LIMITS.timeline),
+    // The delivery time is copied into the quote notes, so a line that talks to an AI must not reach it.
+    deliveryTimeline: dropIfAboutInstructions(clean(timelineLine, LIMITS.timeline)),
     specialNotes: null,
-    flags: looksLikeInstructionsToAi(mail.latestText) ? ['instructions_to_ai'] : [],
+    flags: flagged ? ['instructions_to_ai'] : [],
     source: 'heuristic',
   };
 }
@@ -106,7 +111,7 @@ export async function extractEmailMetadata(llm: LlmClient, mail: InboundMail): P
         const address = clean(out.delivery_address, LIMITS.address);
         return address && NOTE_ABOUT_INSTRUCTIONS.test(address) ? null : address;
       })(),
-      deliveryTimeline: clean(out.delivery_timeline, LIMITS.timeline) ?? heuristic.deliveryTimeline,
+      deliveryTimeline: dropIfAboutInstructions(clean(out.delivery_timeline, LIMITS.timeline) ?? heuristic.deliveryTimeline),
       specialNotes: notes && NOTE_ABOUT_INSTRUCTIONS.test(notes) ? null : notes,
       flags: heuristic.flags,
       source: 'llm',

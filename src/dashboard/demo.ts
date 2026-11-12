@@ -346,7 +346,7 @@ async function main(): Promise<void> {
   }
   clock = new Date();
   const live = new UserStore(db);
-  const { port, close } = await startDashboard({ config, repo, users: live, notes: new NoteStore(db), zoho: { api: demoZoho(), organizationId: config.zoho?.organizationId ?? '60092547421' } });
+  const { port, close } = await startDashboard({ config, repo, users: live, notes: new NoteStore(db), zoho: { api: demoZoho(), organizationId: config.zoho?.organizationId ?? '60092547421' }, sendTestAlert: async () => ({ delivered: false, dryRun: true }) });
   const pretendRetry = setInterval(() => finishDemoHeld(repo, config.zoho?.organizationId ?? '60092547421'), 4000);
   pretendRetry.unref();
   console.log(`\nDemo dashboard: http://localhost:${port}\nPassword for every demo login: ${password}\n${DEMO_TEAM.map((u) => `  ${u.role.padEnd(8)} ${u.email}`).join('\n')}\n(The sign-in page also has one-click buttons for each role. Ctrl+C to stop. Nothing here is real data.)`);

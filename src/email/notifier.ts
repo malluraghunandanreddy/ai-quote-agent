@@ -34,6 +34,8 @@ export interface UnmatchedLineInfo {
   description: string;
   quantity: number;
   reason: string;
+  /** The AI's best guess at the catalogue item, shown to the team (never priced). */
+  suggestion?: string;
 }
 
 /**
@@ -56,6 +58,8 @@ export interface SendResult {
 }
 
 export interface Notifier {
+  /** Send a test message to the Sales or stakeholders list (the dashboard's "Send a test" button). */
+  testAlert?(list: 'sales' | 'stakeholders'): Promise<SendResult>;
   /** Notification A: rows or quantities could not be read (a quote may or may not have been created). */
   additionalInfoRequired(ctx: {
     enquiry: EnquiryRef;
@@ -180,13 +184,15 @@ const listed = (items: string[]): string[] =>
 
 export class MailNotifier implements Notifier {
   private transporter: Transporter | null = null;
-  private readonly allowed: Set<string>;
+  private readonly recipients: () => { sales: string[]; stakeholders: string[] };
 
+  /** `recipients` says who hears what right now (the owner can change it from the dashboard); by default the settings file's addresses. */
   constructor(
     private readonly config: Config,
     private readonly llm: LlmClient,
+    recipients?: () => { sales: string[]; stakeholders: string[] },
   ) {
-    this.allowed = new Set([config.notify.internal, ...config.notify.stakeholders].map((a) => a.toLowerCase()));
+    this.recipients = recipients ?? (() => ({ sales: [config.notify.internal], stakeholders: config.notify.stakeholders }));
     if (!config.smtp) {
       logger.warn('SMTP_HOST is not set: notification emails are written to the log and NOT delivered.');
     }
@@ -211,7 +217,7 @@ export class MailNotifier implements Notifier {
     }
     return this.deliver({
       subject: `${ALERT_SUBJECT.additionalInfo} – ${whoFor(ctx.enquiry)}`,
-      to: [this.config.notify.internal],
+      to: this.recipients().sales,
       intro,
       sections,
       ...(ctx.quote ? { link: { label: 'Open the draft quotation in Zoho Books', url: ctx.quote.url } } : {}),
@@ -230,7 +236,7 @@ export class MailNotifier implements Notifier {
     });
     return this.deliver({
       subject: `${ALERT_SUBJECT.unmatched} – ${whoFor(ctx.enquiry)}`,
-      to: this.config.notify.stakeholders,
+      to: this.recipients().stakeholders,
       intro,
       sections: [
         enquirySection(ctx.enquiry),
@@ -239,7 +245,7 @@ export class MailNotifier implements Notifier {
           bullets: listed(
             ctx.unmatched.map(
               (u) =>
-                `Row ${u.rowNumber} · ${u.sku ?? 'no code'} · ${oneLine(u.description, 80)} · qty ${u.quantity} · ${u.reason}`,
+                `Row ${u.rowNumber} · ${u.sku ?? 'no code'} · ${oneLine(u.description, 80)} · qty ${u.quantity} · ${u.reason}${u.suggestion ? ` · AI suggests: ${oneLine(u.suggestion, 100)}` : ''}`,
             ),
           ),
         },
@@ -276,7 +282,7 @@ export class MailNotifier implements Notifier {
 
     return this.deliver({
       subject: `${ALERT_SUBJECT.draft} – ${oneLine(ctx.customerName, 80)}`,
-      to: [this.config.notify.internal],
+      to: this.recipients().sales,
       intro: `A draft quotation was created in Zoho Books for the enquiry below.`,
       sections,
       link: { label: 'Open in Zoho Books', url: quote.url },
@@ -296,7 +302,7 @@ export class MailNotifier implements Notifier {
           : 'No customer matched by sender email, email domain, or company name.',
         'Customers are never created automatically.',
         ...(this.config.hold.days > 0
-          ? [`This email is being kept for up to ${this.config.hold.days} days. As soon as this customer exists in Zoho Books, the draft quote is created automatically within a few minutes. The sender does not need to resend anything.`]
+          ? [`This email is being kept for up to ${this.config.hold.days} days. Once this customer exists in Zoho Books, the draft quote is created automatically within a couple of minutes, and the sender does not need to resend anything. Add the customer from the dashboard (Add to Zoho Books), or add it in Zoho Books and click "Check again now" on the enquiry. If nobody does, the assistant looks again every ${this.config.hold.checkMinutes} minutes.`]
           : []),
       ],
     });
@@ -326,7 +332,7 @@ export class MailNotifier implements Notifier {
     const base = this.config.dashboard.publicUrl;
     return this.deliver({
       subject: `[Quote agent] ${ambiguous ? 'Ambiguous customer' : 'Customer not found'}: ${oneLine(ctx.enquiry.senderEmail, 80)}`,
-      to: [this.config.notify.internal],
+      to: this.recipients().sales,
       intro,
       sections,
       ...(base ? { link: { label: 'Open this enquiry in the dashboard', url: `${base}/enquiry/${ctx.enquiry.enquiryId}` } } : {}),
@@ -342,7 +348,7 @@ export class MailNotifier implements Notifier {
     });
     return this.deliver({
       subject: `[Quote agent] Processing failed: ${oneLine(ctx.enquiry.subject, 100) || ctx.enquiry.senderEmail}`,
-      to: [this.config.notify.internal],
+      to: this.recipients().sales,
       intro,
       sections: [
         enquirySection(ctx.enquiry),
@@ -356,7 +362,7 @@ export class MailNotifier implements Notifier {
     const down = ctx.kind === 'down';
     return this.deliver({
       subject: down ? '[Quote agent] SERVICE PROBLEM: emails are not being processed' : '[Quote agent] Service recovered',
-      to: [this.config.notify.internal],
+      to: this.recipients().sales,
       intro: down
         ? `The quote assistant could not check the mailbox ${ctx.consecutiveFailures ?? 'several'} times in a row. New enquiries are NOT being turned into draft quotes until this is fixed.`
         : 'The quote assistant is checking the mailbox normally again. Enquiries that arrived during the problem are picked up automatically.',
@@ -403,11 +409,22 @@ export class MailNotifier implements Notifier {
     const quiet = s.received === 0 && s.needAttention.length === 0;
     return this.deliver({
       subject: `[Quote agent] Daily summary ${s.date}: ${s.received} received, ${s.drafts} draft${s.drafts === 1 ? '' : 's'}${s.needAttention.length ? `, ${s.needAttention.length} need attention` : ''}`,
-      to: [this.config.notify.internal],
+      to: this.recipients().sales,
       intro: quiet ? 'No enquiries arrived in the last 24 hours and nothing is waiting. The service is running.' : 'Here is what the quote assistant did in the last 24 hours.',
       sections,
       ...(s.dashboardUrl ? { link: { label: 'Open the dashboard', url: s.dashboardUrl } } : {}),
       footer: 'Draft quotes are never sent to customers. Review them in Zoho Books before sending.',
+    });
+  }
+
+  /** One short message to a list, so the owner can see that an address really receives the alerts. */
+  async testAlert(list: 'sales' | 'stakeholders'): Promise<SendResult> {
+    return this.deliver({
+      subject: '[Quote agent] Test alert',
+      to: this.recipients()[list],
+      intro: `This is a test from the quote assistant. You are on the ${list === 'sales' ? 'Sales' : 'stakeholders'} list, so you will get ${list === 'sales' ? 'the "Draft Quotation Created" and "Additional Information Required" alerts' : 'the "New/Unmatched Products Identified" alerts'}.`,
+      sections: [],
+      footer: 'Nothing was sent to any customer.',
     });
   }
 
@@ -434,8 +451,11 @@ export class MailNotifier implements Notifier {
   }
 
   private async deliver(doc: MailDoc): Promise<SendResult> {
+    // Only the addresses the client's team has chosen (settings file or the dashboard) can ever be written to.
+    const now = this.recipients();
+    const allowed = new Set([this.config.notify.internal, ...this.config.notify.stakeholders, ...now.sales, ...now.stakeholders].map((a) => a.toLowerCase()));
     for (const address of doc.to) {
-      if (!this.allowed.has(address.toLowerCase())) {
+      if (!allowed.has(address.toLowerCase())) {
         throw new Error(`Refusing to email ${address}: only configured internal recipients are allowed`);
       }
     }

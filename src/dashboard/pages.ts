@@ -125,6 +125,7 @@ const FLAG_HELP: Record<string, string> = {
   LARGE_TOTAL: 'The quote total is unusually large. Check quantities and prices before sending.',
   FRACTIONAL_UNITS: 'A fractional quantity for a counted unit, such as 2.5 pieces.',
   DUPLICATE_ITEM: 'The same item code appears on more than one row. Both lines were kept.',
+  AI_ITEM_MATCH: "One or more lines were matched to a catalogue item by the AI from the customer's own wording. Each says [AI MATCH - PLEASE CHECK] in the quote. Check them before sending.",
 };
 
 export interface CustomerFormView {
@@ -139,7 +140,7 @@ export interface CustomerFormView {
   addedRecently?: boolean;
 }
 
-export function enquiryPage(opts: { customerForm?: CustomerFormView; flashBad?: boolean; clientName: string; viewer: Viewer; brand?: Brand; e: Enquiry; audit: Array<{ event: string; detail: string | null; at: string }>; notices: Array<{ kind: string; sentAt: string }>; notes: EnquiryNote[]; handled: boolean; flash?: string; tz: string; now: Date; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner'] }): string {
+export function enquiryPage(opts: { recheck?: { canDo: boolean; everyMinutes: number }; customerForm?: CustomerFormView; flashBad?: boolean; clientName: string; viewer: Viewer; brand?: Brand; e: Enquiry; audit: Array<{ event: string; detail: string | null; at: string }>; notices: Array<{ kind: string; sentAt: string }>; notes: EnquiryNote[]; handled: boolean; flash?: string; tz: string; now: Date; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner'] }): string {
   const { e, tz } = opts;
   const name = e.customerName || e.companyInEmail || e.senderEmail;
   const url = safeUrl(e.quoteUrl);
@@ -197,17 +198,21 @@ export function enquiryPage(opts: { customerForm?: CustomerFormView; flashBad?: 
         return `<section class="panel mb" aria-labelledby="h-addcust"><h2 id="h-addcust">Add this customer to Zoho Books</h2><p class="sub">These details were read from the email. Check them, fix anything that is wrong, then add the customer. Nothing is created until a person clicks the button.</p>${flashHtml}${body}<p class="sub p8">${esc(next)}</p></section>`;
       })()
     : '';
+  const rc = opts.recheck;
+  const recheckPanel = rc && !cf?.addedRecently
+    ? `<section class="panel mb" aria-labelledby="h-recheck"><h2 id="h-recheck">Fixed it in Zoho Books yourself?</h2><p class="sub">If you added or corrected the customer directly in Zoho Books, ask the assistant to look again now. It will make the quote within a couple of minutes. Otherwise it looks again by itself every ${rc.everyMinutes} minutes.</p>${rc.canDo ? `<form method="post" action="/enquiry/${e.id}/recheck" class="form">${csrfField(opts.viewer)}<div class="actions"><button class="btn ghost" type="submit">Check again now</button></div></form>` : `<p class="sub p8">Your role (${esc(opts.viewer.role)}) cannot do this. Ask a staff member or manager.</p>`}</section>`
+    : '';
   const notesPanel = `<section class="panel mb" aria-labelledby="h-notes"><h2 id="h-notes">Team notes</h2><p class="sub">Kept on this server only. Nothing here is written to Zoho Books.</p>${opts.flash && !opts.flashBad ? `<p class="okmsg" role="status">${esc(opts.flash)}</p>` : ''}${noteItems ? `<ul class="notes">${noteItems}</ul>` : '<p class="sub">No notes yet.</p>'}${noteForm}</section>`;
   const body = `<p class="back"><a href="/enquiries">← All enquiries</a></p>
 <div class="head mid"><h1 class="pt big">${esc(name)}</h1>${url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Open the quote in Zoho Books ↗</a>` : ''}</div>
 <p class="chipsrow">${statusChip(e.status)}${handledChip}${flagChips(e.reviewFlags)}</p>
-${needs}${customerPanel}${flags}${notesPanel}
+${needs}${customerPanel}${recheckPanel}${flags}${notesPanel}
 <div class="row r2"><section class="panel"><h2>The enquiry</h2><p class="sub">What came in, and what it became.</p><dl class="facts">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl></section>
 <section class="panel"><h2>What the assistant did</h2><p class="sub">Step by step, in order.</p><ol class="tl">${timeline}</ol></section></div>`;
   return layout({ title: `${name}`, active: 'enquiries', clientName: opts.clientName, viewer: opts.viewer, ...(opts.brand ? { brand: opts.brand } : {}), demo: opts.demo, live: opts.live, ...(opts.banner ? { banner: opts.banner } : {}), body });
 }
 
-export function statusPage(opts: { config: Config; services: ServiceRow[]; clientName: string; viewer: Viewer; brand?: Brand; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner']; startedAt?: string; now: Date }): string {
+export function statusPage(opts: { recipients: { sales: string[]; stakeholders: string[] }; usage: { drafts: number; aiCalls: number; tokensIn: number; tokensOut: number; costUsd: number }; config: Config; services: ServiceRow[]; clientName: string; viewer: Viewer; brand?: Brand; demo: boolean; live: OverviewModel['live']; banner?: OverviewModel['banner']; startedAt?: string; now: Date }): string {
   const { config } = opts;
   const dot = (k: ServiceRow['kind']): string => `<span class="dot ${k === 'ok' ? 'ok' : k}"></span>`;
   const rows = opts.services.map((s) => `<div class="svc">${dot(s.kind)}<span class="nm">${esc(s.name)}<div class="sub">${esc(s.state)}</div></span><span class="d">${esc(s.detail)}</span></div>`).join('');
@@ -215,8 +220,9 @@ export function statusPage(opts: { config: Config; services: ServiceRow[]; clien
     ['Mailbox checked', config.schedule.cron === '*/2 * * * *' ? 'Every 2 minutes' : `On schedule: ${config.schedule.cron}`],
     ['Quote validity', `${config.quote.validityDays} days from the day it is created`],
     ['Time zone', config.timezone],
-    ['Alert emails go to', config.notify.internal],
-    ['Items-to-price alerts go to', config.notify.stakeholders.join(', ')],
+    ['Alert emails go to', opts.recipients.sales.join(', ')],
+    ['Items-to-price alerts go to', opts.recipients.stakeholders.join(', ')],
+    ['This month so far', `${opts.usage.drafts} draft ${opts.usage.drafts === 1 ? 'quote' : 'quotes'} · ${opts.usage.aiCalls} AI calls · ${new Intl.NumberFormat('en-IN').format(opts.usage.tokensIn + opts.usage.tokensOut)} tokens${config.dashboard.showAiCost ? ` (about $${opts.usage.costUsd.toFixed(2)})` : ''}`],
     ['Daily summary', config.alerts.dailySummaryCron ? 'Sent every day' : 'Off'],
     ['Flags a quantity above', new Intl.NumberFormat('en-IN').format(config.review.warnQuantityAbove)],
     ['Flags a quote total above', new Intl.NumberFormat('en-IN').format(config.review.warnTotalAbove)],
@@ -236,7 +242,7 @@ export function dataPage(opts: { config: Config; clientName: string; viewer: Vie
 <div class="three">
 <section class="panel"><span class="eyebrow">In your Zoho Books</span><h3>Customers, items, prices, quotes</h3><p>All the business data stays in your own Zoho Books account. The assistant only <b>creates draft quotes</b>. It never sends one to a customer and never changes a customer or an item.</p></section>
 <section class="panel"><span class="eyebrow">On this server</span><h3>A log of what happened</h3><p>For each email: who sent it, the subject, the Excel file name, the result, the quote number and total, and the steps taken. ${holdDays > 0 ? `<b>No email text and no Excel files are kept, with one exception:</b> an email from a customer who is not in your Zoho Books yet is held for up to <b>${holdDays} days</b>, together with the contact details read from its signature, so its quote can be made automatically once you add them. They are deleted as soon as the customer is added and the quote is made.` : '<b>No email text and no Excel files are stored.</b>'} Records are deleted after <b>${days} days</b>.</p></section>
-<section class="panel"><span class="eyebrow">Sent to Claude, read once</span><h3>The text of the email</h3><p>To understand a messy email, its text (and a few top rows of an unusual spreadsheet) is sent to Anthropic's Claude to read. Our server does not keep it. How Anthropic handles it follows the terms of your Anthropic account.</p></section>
+<section class="panel"><span class="eyebrow">Sent to Claude, read once</span><h3>The text of the email</h3><p>To understand a messy email, its text (and a few top rows of an unusual spreadsheet) is sent to Anthropic's Claude to read. For item lines nothing else could match, the item descriptions from the Excel are sent too, together with the names of your catalogue items, so the AI can suggest the closest one. Our server does not keep any of it. How Anthropic handles it follows the terms of your Anthropic account.</p></section>
 </div>
 <div class="row r2 mt"><section class="panel"><h2>Your mailbox</h2><p class="sub p0">The original emails stay in your mailbox. The assistant marks them as read once handled and does not copy or delete them.</p></section>
 <section class="panel"><h2>Keys and passwords</h2><p class="sub p0">Stored in a protected settings file on the server. They are never shown on this page or written to the logs.</p></section></div>

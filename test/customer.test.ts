@@ -336,6 +336,31 @@ describe('the "Add to Zoho Books" button on an enquiry', () => {
     assert.equal(fake.createdContacts.length, 1);
   });
 
+  it('"Check again now": a person who fixed the customer in Zoho Books asks the assistant to look again at once', async () => {
+    const waiting = make('HALTED_CUSTOMER_NOT_FOUND', 'k6');
+    const staff = await as('staff@x.co');
+    const page = (await staff.get(`/enquiry/${waiting}`)).text;
+    assert.match(page, /Fixed it in Zoho Books yourself\?/);
+    assert.match(page, /looks again by itself every 30 minutes/);
+    assert.match(page, /<button class="btn ghost" type="submit">Check again now<\/button>/);
+    assert.equal(repo.heldDue(30, 10).includes(waiting), false, 'nothing is due before the click');
+
+    const viewer = await as('viewer@x.co');
+    assert.doesNotMatch((await viewer.get(`/enquiry/${waiting}`)).text, /Check again now<\/button>/);
+    assert.equal((await viewer.post(`/enquiry/${waiting}/recheck`, { _csrf: await viewer.csrf() })).status, 403);
+    assert.equal((await staff.post(`/enquiry/${waiting}/recheck`, {})).status, 403, 'no form token');
+
+    const r = await staff.post(`/enquiry/${waiting}/recheck`, { _csrf: await staff.csrf() });
+    assert.deepEqual([r.status, r.location], [303, `/enquiry/${waiting}?saved=recheck`]);
+    assert.ok(repo.heldDue(30, 10).includes(waiting), 'now due at once');
+    assert.ok(repo.auditTrail(waiting).some((a) => a.event === 'RECHECK_REQUESTED' && /STAFF/.test(a.detail ?? '')));
+    assert.match((await staff.get(`/enquiry/${waiting}?saved=recheck`)).text, /The assistant will look again within a couple of minutes/);
+
+    const gone = make('HALTED_CUSTOMER_NOT_FOUND', 'k7', false);
+    assert.doesNotMatch((await staff.get(`/enquiry/${gone}`)).text, /Fixed it in Zoho Books yourself/, 'no button once the email is no longer kept');
+    assert.equal((await staff.post(`/enquiry/${gone}/recheck`, { _csrf: await staff.csrf() })).location, `/enquiry/${gone}?saved=recheck_none`);
+  });
+
   it('only offers it for an enquiry that is waiting for a customer, and says to resend once the email is no longer kept', async () => {
     const done = make('QUOTE_CREATED', 'k4');
     const c = await as('staff@x.co');
@@ -465,6 +490,42 @@ describe('the contact details read from a signature', () => {
     assert.equal(repo.expireHeld(), 1);
     assert.equal(repo.get(c.id)?.customerDraft, null, 'phone number, address and GST number are gone');
     assert.equal(repo.get(c.id)?.status, 'HALTED_CUSTOMER_NOT_FOUND', 'the enquiry itself still needs a person');
+    db.close();
+  });
+});
+
+describe('how often a waiting new-customer email is looked at again', () => {
+  it('only as a safety net: every 30 minutes on the first day, every 2 hours after that, and at once when a person asks', () => {
+    const db = openDatabase(':memory:');
+    let clock = new Date('2026-10-21T10:00:00Z');
+    const repo = new Repository(db, { dedupeWindowHours: 48, maxAttempts: 5, staleProcessingMinutes: 15, now: () => clock });
+    const c = repo.claim({ messageKey: 'k', contentHash: 'h', messageId: 'm', senderEmail: 'a@b.co', subject: 's', attachmentName: 'a.xlsx' });
+    if (c.outcome !== 'claimed') throw new Error('claim failed');
+    repo.finish(c.id, 'HALTED_CUSTOMER_NOT_FOUND', 'No customer');
+    repo.holdMail(c.id, Buffer.from('raw'), '2026-10-28T10:00:00.000Z', 50);
+    const at = (iso: string): void => void (clock = new Date(iso));
+    const due = (): boolean => repo.heldDue(30, 10).includes(c.id);
+
+    at('2026-10-21T10:20:00Z');
+    assert.equal(due(), false, '20 minutes after it was kept');
+    at('2026-10-21T10:31:00Z');
+    assert.equal(due(), true, 'just over 30 minutes');
+    repo.touchHeld(c.id);
+    at('2026-10-21T10:50:00Z');
+    assert.equal(due(), false);
+    at('2026-10-21T11:02:00Z');
+    assert.equal(due(), true);
+
+    at('2026-10-22T12:00:00Z'); // waiting for more than a day
+    assert.equal(due(), true);
+    repo.touchHeld(c.id);
+    at('2026-10-22T13:30:00Z');
+    assert.equal(due(), false, 'now only every 2 hours');
+    at('2026-10-22T14:01:00Z');
+    assert.equal(due(), true);
+    repo.touchHeld(c.id);
+    repo.makeHeldDue(c.id);
+    assert.equal(due(), true, 'a person asked: look straight away');
     db.close();
   });
 });

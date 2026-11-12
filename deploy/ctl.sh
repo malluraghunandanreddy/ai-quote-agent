@@ -56,6 +56,11 @@ case "$cmd" in
         if (!cfg.llm.enabled) console.log("Note: Claude is off (" + cfg.llm.disabledReason + "); only the rules-based reading runs.");
       } catch (e) { console.error(e.message); process.exit(1); }'
     ;;
+  preflight)
+    # Try the real mailbox, alert sending, Zoho Books and Claude, and say in plain words what is wrong. Changes nothing
+    # (add --send to also send one test email to the internal address).
+    run -T app node dist/ops/preflight.js "$@"
+    ;;
   users)
     # ./ctl.sh users                      list people
     # ./ctl.sh users add a@b.com "Name" owner|manager|staff|viewer

@@ -10,8 +10,10 @@ import type { Repository } from '../db/repository';
 import { NoteStore, UserError, UserStore, type User } from '../db/users';
 import { errorMessage, logger } from '../logger';
 import { computeHealth } from '../ops/monitor';
+import { monthUsage } from '../ops/usage';
+import { checkRecipients, effectiveRecipients, parseAddressList, resetRecipients, saveRecipients } from '../ops/recipients';
 import { loadBrand } from './brand';
-import { accountPage, activityPage, ACTIVITY_FILTERS, forcedPasswordPage, loginPage, personPage, teamPage, type Flash, type LoginOptions } from './adminPages';
+import { accountPage, activityPage, alertsPage, ACTIVITY_FILTERS, forcedPasswordPage, loginPage, personPage, teamPage, type Flash, type LoginOptions } from './adminPages';
 import { APP_JS } from './assets';
 import { COOKIE, LoginLimiter, parseCookies } from './auth';
 import { chrome, exportCsv, listing, overview, parseRange } from './data';
@@ -27,6 +29,8 @@ export interface DashboardDeps {
   notes?: NoteStore;
   /** The Zoho Books connection, so an approved new customer can be added from an enquiry. Without it the button is not offered. */
   zoho?: { api: ZohoApi; organizationId: string };
+  /** Sends a test message to the Sales or stakeholders list. Without it the "Send a test" buttons are not offered. */
+  sendTestAlert?: (list: 'sales' | 'stakeholders') => Promise<{ delivered: boolean; dryRun: boolean }>;
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -74,6 +78,8 @@ const SAVED: Record<string, string> = {
   reopened: 'Reopened.',
   customer: 'Customer added to Zoho Books. The quote is created automatically within a couple of minutes.',
   customer_exists: 'That customer is already in Zoho Books. The quote is created automatically within a couple of minutes.',
+  recheck: 'Thanks. The assistant will look again within a couple of minutes.',
+  recheck_none: 'This email is no longer being kept, so there is nothing to check again. Ask the sender to resend it.',
   customer_resend: 'Customer added to Zoho Books. This email is no longer being kept, so ask the sender to resend it and it will be quoted straight away.',
 };
 
@@ -296,10 +302,25 @@ export function createDashboardServer(deps: DashboardDeps): http.Server {
       const customerForm = needsCustomer && !notes.isHandled(id)
         ? { addedRecently, values: form ?? e.customerDraft ?? { companyName: e.companyInEmail ?? '', contactName: '', email: e.senderEmail, phone: '', address: '', city: '', state: '', zip: '', gstin: '', source: 'rules' as const }, canCreate: can(me.role, 'customers.create'), available: Boolean(deps.zoho), held: e.holdUntil !== null }
         : undefined;
-      return enquiryPage({ ...common, e, audit: repo.auditTrail(e.id), notices: repo.notificationsFor(e.id), notes: notes.forEnquiry(e.id), handled: notes.isHandled(e.id), ...(flash ? { flash: flash.text } : {}), ...(flash?.error ? { flashBad: true } : {}), ...(customerForm ? { customerForm } : {}), tz, now });
+      const recheck = e.holdUntil !== null && ['HALTED_CUSTOMER_NOT_FOUND', 'HALTED_CUSTOMER_AMBIGUOUS'].includes(e.status) && !notes.isHandled(id) ? { canDo: can(me.role, 'customers.create'), everyMinutes: config.hold.checkMinutes } : undefined;
+      return enquiryPage({ ...common, ...(recheck ? { recheck } : {}), e, audit: repo.auditTrail(e.id), notices: repo.notificationsFor(e.id), notes: notes.forEnquiry(e.id), handled: notes.isHandled(e.id), ...(flash ? { flash: flash.text } : {}), ...(flash?.error ? { flashBad: true } : {}), ...(customerForm ? { customerForm } : {}), tz, now });
     };
 
     // --- add the new customer to Zoho Books, after a person has checked the details ------------------------------------
+    // --- "I added the customer in Zoho Books myself: look again now" ---------------------------------------------------
+    const recheckRoute = /^\/enquiry\/(\d{1,9})\/recheck$/.exec(path);
+    if (recheckRoute && method === 'POST') {
+      if (!need('customers.create')) return;
+      const id = Number(recheckRoute[1]);
+      const e = repo.get(id);
+      if (!e) return send(res, 404, msg('Enquiry not found', 'It may have been removed after the retention period.', viewer));
+      if (e.holdUntil === null || !['HALTED_CUSTOMER_NOT_FOUND', 'HALTED_CUSTOMER_AMBIGUOUS'].includes(e.status)) return redirect(res, `/enquiry/${id}?saved=recheck_none`);
+      repo.makeHeldDue(id);
+      repo.audit(id, 'RECHECK_REQUESTED', `asked for by ${me.name}`);
+      users.logEvent({ actor, event: 'customer_recheck', target: enquiryLabel(id), ip });
+      return redirect(res, `/enquiry/${id}?saved=recheck`);
+    }
+
     const addRoute = /^\/enquiry\/(\d{1,9})\/customer$/.exec(path);
     if (addRoute && method === 'POST') {
       if (!need('customers.create')) return;
@@ -356,6 +377,44 @@ export function createDashboardServer(deps: DashboardDeps): http.Server {
         throw err;
       }
     }
+    // --- who receives the alert emails (owner only) --------------------------------------------------------------------
+    const showAlerts = (status: number, flash?: Flash, draft?: { sales: string; stakeholders: string }): void =>
+      send(res, status, alertsPage({ ...base, recipients: effectiveRecipients(repo, config), canTest: Boolean(deps.sendTestAlert), domains: config.notify.allowedDomains, ...(flash ? { flash } : {}), ...(draft ? { draft } : {}) }));
+    if (path === '/alerts' && method === 'GET') {
+      if (!need('alerts.manage')) return;
+      const saved = url.searchParams.get('saved');
+      const text = saved === 'saved' ? 'Saved. From now on each alert goes only to the addresses on its list.' : saved === 'reset' ? 'Back to the addresses from setup.' : '';
+      return showAlerts(200, text ? { kind: 'ok', text } : undefined);
+    }
+    if (path === '/alerts' && method === 'POST') {
+      if (!need('alerts.manage')) return;
+      const lists = { sales: parseAddressList(f.get('sales') ?? ''), stakeholders: parseAddressList(f.get('stakeholders') ?? '') };
+      const problems = checkRecipients(lists, { config, isCustomerAddress: (a) => repo.isCustomerAddress(a) });
+      if (problems.length > 0) return showAlerts(400, { kind: 'bad', text: problems.join(' ') }, { sales: (f.get('sales') ?? '').slice(0, 1200), stakeholders: (f.get('stakeholders') ?? '').slice(0, 1200) });
+      saveRecipients(repo, lists);
+      users.logEvent({ actor, event: 'alerts_changed', target: 'alert recipients', detail: `Sales: ${lists.sales.join(', ')} | Stakeholders: ${lists.stakeholders.join(', ')}`.slice(0, 480), ip });
+      return redirect(res, '/alerts?saved=saved');
+    }
+    if (path === '/alerts/reset' && method === 'POST') {
+      if (!need('alerts.manage')) return;
+      resetRecipients(repo);
+      users.logEvent({ actor, event: 'alerts_reset', target: 'alert recipients', ip });
+      return redirect(res, '/alerts?saved=reset');
+    }
+    if (path === '/alerts/test' && method === 'POST') {
+      if (!need('alerts.manage')) return;
+      const list = f.get('list') === 'stakeholders' ? 'stakeholders' : 'sales';
+      if (!deps.sendTestAlert) return showAlerts(503, { kind: 'bad', text: 'Sending a test needs the quote service to be running.' });
+      try {
+        const result = await deps.sendTestAlert(list);
+        users.logEvent({ actor, event: 'alerts_test', target: list === 'sales' ? 'Sales list' : 'stakeholders list', ip });
+        const who = effectiveRecipients(repo, config)[list].join(', ');
+        return showAlerts(200, { kind: 'ok', text: result.delivered ? `A test email was sent to ${who}. Ask them to check their inbox (and spam).` : `Outgoing email is not set up on this installation, so nothing was sent. It would have gone to ${who}.` });
+      } catch (err) {
+        return showAlerts(502, { kind: 'bad', text: `The test email could not be sent: ${errorMessage(err).slice(0, 200)}` });
+      }
+    }
+
     const teamAct = /^\/team\/(\d{1,9})(?:\/(role|active|reset|unlock))?$/.exec(path);
     if (path === '/team' && method === 'GET') {
       if (!need('team.view')) return;
@@ -436,7 +495,7 @@ export function createDashboardServer(deps: DashboardDeps): http.Server {
     if (path === '/status') {
       if (!need('status.view')) return;
       const started = repo.getMeta('started_at');
-      return send(res, 200, statusPage({ ...common, config, services: page.services, now, ...(started ? { startedAt: started } : {}) }));
+      return send(res, 200, statusPage({ ...common, recipients: effectiveRecipients(repo, config), usage: monthUsage(repo, config, now), config, services: page.services, now, ...(started ? { startedAt: started } : {}) }));
     }
     if (path === '/activity') {
       if (!need('activity.view')) return;

@@ -71,6 +71,7 @@ If the server is not on the internet yet or you want to look first, `--mode loca
 | Command | What it does |
 |---|---|
 | `./ctl.sh check` | Are all needed settings filled in? |
+| `./ctl.sh preflight` | Do the real connections work (mailbox, alert emails, Zoho Books, Claude)? Changes nothing |
 | `./ctl.sh up` / `down` / `restart` | Start (or apply `.env` changes) / stop / restart |
 | `./ctl.sh status` / `logs [lines]` | Healthy? / what is it doing |
 | `./ctl.sh users` ... | List people, `add a@b.com "Name" owner`, `reset a@b.com` (a forgotten owner password) |

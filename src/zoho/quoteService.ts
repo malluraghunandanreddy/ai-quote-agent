@@ -9,6 +9,7 @@ import { ZohoApiError } from './client';
  */
 
 export const UNMATCHED_MARKER = '[UNMATCHED ITEM - MANUAL PRICING REQUIRED]';
+export const AI_MATCH_MARKER = '[AI MATCH - PLEASE CHECK]';
 const NAME_LIMIT = 100;
 
 const LineItemResponse = z.looseObject({
@@ -82,12 +83,16 @@ export function buildEstimatePayload(input: EstimatePayloadInput): EstimatePaylo
         item_id: match.item.item_id,
         name: match.item.name,
         quantity: line.quantity,
+        // A match made from the customer's own wording is marked on the line itself, so it cannot go out unchecked.
+        ...(match.by === 'ai' ? { description: truncate(`${AI_MATCH_MARKER} Customer wrote: ${line.description}`, 500) } : {}),
         ...(input.sendItemRate && match.item.rate !== undefined ? { rate: match.item.rate } : {}),
       };
     }
     return {
       name: truncate(line.sku ? `${line.sku} - ${line.description}` : line.description, NAME_LIMIT),
-      description: UNMATCHED_MARKER,
+      description: match.suggestion
+        ? truncate(`${UNMATCHED_MARKER} Suggested: ${match.suggestion.name}${match.suggestion.sku ? ` (code ${match.suggestion.sku})` : ''}`, 500)
+        : UNMATCHED_MARKER,
       quantity: line.quantity,
       rate: 0,
       ...(line.uom ? { unit: line.uom } : {}),

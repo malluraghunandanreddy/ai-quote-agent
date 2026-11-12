@@ -134,6 +134,8 @@ export interface ZohoItem {
   unit?: string;
   status?: string;
   product_type?: string;
+  /** The longer description kept on the item in Zoho Books, when there is one. */
+  description?: string;
 }
 
 export type CustomerMatchTier = 'email' | 'domain' | 'company_name';
@@ -144,8 +146,10 @@ export type CustomerResolution =
   | { status: 'not_found' };
 
 export type ItemMatch =
-  | { status: 'matched'; by: 'sku' | 'name'; item: ZohoItem }
-  | { status: 'unmatched'; reason: 'NOT_FOUND' | 'AMBIGUOUS' };
+  /** 'ai' = linked from the customer's own wording by the AI (only when it was very sure); the quote line says so. */
+  | { status: 'matched'; by: 'sku' | 'name' | 'ai'; item: ZohoItem }
+  /** `suggestion` = the AI's best guess, shown to the team but never priced. */
+  | { status: 'unmatched'; reason: 'NOT_FOUND' | 'AMBIGUOUS'; suggestion?: ZohoItem };
 
 export interface MatchedLine {
   line: RfqLine;

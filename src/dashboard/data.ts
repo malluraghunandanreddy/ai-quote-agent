@@ -1,5 +1,6 @@
 import type { Config } from '../config';
 import type { Enquiry, Repository } from '../db/repository';
+import { effectiveRecipients } from '../ops/recipients';
 import { attentionReason, computeHealth, isAttention, isDraft, timeSavedMinutes, usageCost, type HealthStatus } from '../ops/monitor';
 import type { EnquiryStatus } from '../types';
 import type { DayBucket } from './charts';
@@ -113,7 +114,7 @@ export function services(repo: Repository, config: Config, health: HealthStatus,
       ? { name: 'Claude (reads the emails)', kind: 'ok', state: 'On', detail: `${config.llm.model} · used only to read email text and odd column headings` }
       : { name: 'Claude (reads the emails)', kind: 'warn', state: 'Off', detail: `Using simple rules only (${config.llm.disabledReason ?? 'not configured'}).` },
     config.smtp
-      ? { name: 'Alert emails', kind: 'ok', state: 'On', detail: `Sent to ${config.notify.internal}` }
+      ? { name: 'Alert emails', kind: 'ok', state: 'On', detail: `Sales: ${effectiveRecipients(repo, config).sales.join(', ')}` }
       : { name: 'Alert emails', kind: 'warn', state: 'Not set up', detail: 'Alerts are only written to the log until outgoing mail is configured.' },
     { name: 'Daily backup', kind: !lastBackupAt ? 'warn' : backupOk && backupFresh ? 'ok' : 'bad', state: !lastBackupAt ? 'No backup yet' : backupOk && backupFresh ? 'Up to date' : 'Needs attention', detail: lastBackupAt ? `Last backup ${relTime(lastBackupAt, now, tz)} · kept ${config.backup.keep} days` : 'The first backup is taken overnight.' },
   ];
@@ -357,6 +358,7 @@ export function describeEvent(event: string, detail: string | null): { what: str
   if (event === 'RETRY') return { what: 'Tried again', more: d };
   if (event === 'HELD') return { what: 'Email kept for the new customer', more: d };
   if (event === 'HOLD_EXPIRED') return { what: 'Stopped keeping the email', more: d };
+  if (event === 'ITEM_AI_MATCH') return { what: 'Asked the AI to match item wording', more: d };
   if (event === 'CUSTOMER_ADDED') return { what: 'Customer added to Zoho Books', more: d };
   if (event === 'EMAIL_METADATA') return { what: 'Read the email text', more: d.startsWith('llm') ? 'Understood with Claude' : 'Read with simple rules' + (d.includes('flags=') ? ' · contained text addressed to an AI, which was ignored' : '') };
   if (event === 'EXCEL_PARSED') return { what: 'Read the Excel', more: d.replace('columns by rules', 'columns found by the standard rules').replace('columns by llm', 'columns placed with Claude, then checked') };

@@ -23,6 +23,7 @@ export class ItemCatalog {
   private loadedAt = 0;
   private loading: Promise<void> | null = null;
   private count = 0;
+  private active: ZohoItem[] = [];
 
   constructor(
     private readonly api: ZohoApi,
@@ -32,6 +33,11 @@ export class ItemCatalog {
 
   get size(): number {
     return this.count;
+  }
+
+  /** The active items as loaded (for the AI's help with wording the exact rules cannot match). */
+  activeItems(): ZohoItem[] {
+    return this.active;
   }
 
   async ensureLoaded(): Promise<void> {
@@ -56,6 +62,7 @@ export class ItemCatalog {
     this.bySku = bySku;
     this.byName = byName;
     this.count = count;
+    this.active = items.filter((i) => i.status === undefined || i.status === 'active');
     this.loadedAt = this.clock();
     logger.info('Zoho item master loaded', { activeItems: count });
   }

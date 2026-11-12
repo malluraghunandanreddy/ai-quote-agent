@@ -33,6 +33,7 @@ export const REVIEW_FLAG_TEXT: Record<string, string> = {
   LARGE_TOTAL: 'Large total',
   FRACTIONAL_UNITS: 'Fractional count',
   DUPLICATE_ITEM: 'Repeated item',
+  AI_ITEM_MATCH: 'Item matched by AI',
 };
 
 export const flagChips = (flags: string[]): string =>
@@ -66,7 +67,7 @@ export const csrfField = (v: Viewer): string => `<input type="hidden" name="_csr
 
 export interface LayoutOptions {
   title: string;
-  active: 'overview' | 'enquiries' | 'status' | 'team' | 'activity' | 'data' | 'account' | '';
+  active: 'overview' | 'enquiries' | 'status' | 'team' | 'alerts' | 'activity' | 'data' | 'account' | '';
   clientName: string;
   body: string;
   viewer?: Viewer;
@@ -87,6 +88,7 @@ const NAV: Array<[LayoutOptions['active'], string, string, Permission | null]> =
   ['enquiries', '/enquiries', 'Enquiries', 'enquiries.view'],
   ['status', '/status', 'Status', 'status.view'],
   ['team', '/team', 'Team', 'team.view'],
+  ['alerts', '/alerts', 'Alerts', 'alerts.manage'],
   ['activity', '/activity', 'Activity', 'activity.view'],
   ['data', '/data', 'Your data', null],
 ];
